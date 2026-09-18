@@ -1,0 +1,88 @@
+# Desenvolver aqui e executar no Zeus
+
+## Separação de responsabilidades
+
+O computador de desenvolvimento contém código, documentação e testes. O X99 dedicado executa a versão aprovada e mantém o estado local do Zeus. Git transporta código; não transporta memória, bancos, gravações ou credenciais. SSH permite administrar o X99 a partir do computador de desenvolvimento.
+
+Ainda não existe endereço remoto deste repositório. Definir um repositório privado acessível pelas duas máquinas antes de executar o clone. Não inventar uma URL, publicar dados pessoais ou colocar tokens no endereço. O clone local para validação não equivale a publicação no GitHub.
+
+## Primeira execução no servidor
+
+Quando houver uma URL real, clonar o repositório para `~/zeus` usando o usuário criado na instalação. A configuração do serviço depende desse diretório; adaptar a unidade explicitamente se escolher outro local.
+
+No diretório clonado:
+
+```bash
+cd ~/zeus
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+PYTHONPATH=src python3 -m zeus check
+```
+
+Esses comandos verificam a fundação; não configuram IA ou integrações. O projeto ainda não tem dependências externas. Quando houver dependências, usar um ambiente virtual com versões registradas e atualizar o procedimento.
+
+## Rodar automaticamente
+
+Após os testes, ainda com o usuário humano que será dono do serviço:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp ~/zeus/deploy/zeus.service ~/.config/systemd/user/zeus.service
+systemctl --user daemon-reload
+systemctl --user enable --now zeus.service
+systemctl --user status zeus.service
+```
+
+Para manter o serviço de usuário ativo sem uma sessão SSH aberta e iniciá-lo no boot:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+O processo executa como usuário comum. Não precisa de login gráfico, navegador aberto ou terminal conectado. Verificar após reiniciar o X99; o arquivo de serviço ter sido copiado não comprova inicialização automática no hardware.
+
+Logs:
+
+```bash
+journalctl --user -u zeus.service -n 50 --no-pager
+```
+
+## Atualizar sem editar no servidor
+
+Desenvolver, testar e fazer commit na máquina de desenvolvimento. Publicar no remoto configurado. No servidor, deixar a árvore de código sem alterações locais, anotar o commit anterior e baixar a atualização:
+
+```bash
+cd ~/zeus
+git status --short
+git rev-parse HEAD
+git pull --ff-only
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+PYTHONPATH=src python3 -m zeus check
+```
+
+Se os testes passarem, reiniciar e verificar:
+
+```bash
+systemctl --user restart zeus.service
+systemctl --user status zeus.service
+journalctl --user -u zeus.service -n 20 --no-pager
+```
+
+Não automatizar um pull contínuo: cada atualização precisa de uma versão conhecida e verificada. Futuras alterações de banco exigem migração e backup antes da atualização; este procedimento simples cobre a fundação atual.
+
+## Recuperação e dados
+
+O estado fica fora do clone, em `~/.local/state/zeus`. Para um backup consistente simples, parar o serviço antes de copiar o diretório de estado e iniciá-lo em seguida. Guardar uma cópia fora do PC. Restaurar código antigo não desfaz migrações nem recupera dados por si só.
+
+Para desfazer apenas a ativação do serviço:
+
+```bash
+systemctl --user disable --now zeus.service
+rm ~/.config/systemd/user/zeus.service
+systemctl --user daemon-reload
+```
+
+Isso preserva código e estado. Não desativar linger automaticamente: outros serviços de usuário podem depender dele.
+
+## Interface futura
+
+Uma interface web poderá ser hospedada no Zeus e aberta no computador de desenvolvimento. O servidor não precisa de ambiente gráfico para servir essa interface. Quando essa funcionalidade for implementada, definir autenticação e acesso antes de disponibilizá-la fora da própria máquina.

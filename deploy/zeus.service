@@ -1,0 +1,16 @@
+[Unit]
+Description=Zeus base runtime
+
+[Service]
+Type=simple
+WorkingDirectory=%h/zeus
+Environment=PYTHONPATH=%h/zeus/src
+ExecStart=/usr/bin/python3 -m zeus run
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
