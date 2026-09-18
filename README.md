@@ -22,21 +22,30 @@ execução e recebe atualização por `git pull`.
 Requer Python 3.10 ou superior. Apenas biblioteca padrão: nenhuma dependência
 externa, nem para o Telegram, nem para o modelo.
 
+O atalho `./zeus` funciona de qualquer diretório: ele encontra a raiz do
+repositório pelo próprio caminho e monta o `PYTHONPATH` sozinho. Sem ele,
+`python3 -m zeus` só funciona de dentro de `src/`.
+
 ```bash
+./zeus check
+./zeus remember tratamento senhor
+./zeus recall tratamento
+./zeus run
+
 PYTHONPATH=src python3 -m unittest discover -s tests -v
-PYTHONPATH=src python3 -m zeus check
-PYTHONPATH=src python3 -m zeus remember tratamento senhor
-PYTHONPATH=src python3 -m zeus recall tratamento
-PYTHONPATH=src python3 -m zeus run
 ```
 
 Com modelo e canal configurados (veja `docs/CONFIGURACAO.md`):
 
 ```bash
-PYTHONPATH=src python3 -m zeus check --modelo --canal
-PYTHONPATH=src python3 -m zeus conversar "vou treinar mais tarde"
-PYTHONPATH=src python3 -m zeus agenda
+./zeus check --modelo --canal
+./zeus conversar "vou treinar mais tarde"
+./zeus agenda
 ```
+
+`check` diz em `origem` qual arquivo de configuração foi lido de verdade. Se
+aparecer "não existe", o Zeus está rodando com os padrões e qualquer edição
+feita em outro arquivo não tem efeito.
 
 Ctrl+C encerra o processo. Os dados ficam em `~/.local/state/zeus`, ou sob
 `XDG_STATE_HOME` quando configurado. Use `--state-dir CAMINHO` antes do

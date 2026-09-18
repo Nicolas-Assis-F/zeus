@@ -61,10 +61,10 @@ verdade, latência medida e uma conversa longa com a persona.
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
-PYTHONPATH=src python3 -m zeus check --modelo --canal
-PYTHONPATH=src python3 -m zeus conversar "amanhã cedo eu saio mais tarde"
-PYTHONPATH=src python3 -m zeus agenda
-PYTHONPATH=src python3 -m zeus persona
-PYTHONPATH=src python3 -m zeus evento entrada "pessoa na entrada" --simulado
-PYTHONPATH=src python3 -m zeus run
+./zeus check --modelo --canal
+./zeus conversar "amanhã cedo eu saio mais tarde"
+./zeus agenda
+./zeus persona
+./zeus evento entrada "pessoa na entrada" --simulado
+./zeus run
 ```

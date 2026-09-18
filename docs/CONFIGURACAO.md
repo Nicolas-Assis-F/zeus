@@ -1,7 +1,11 @@
 # Configuração do Zeus
 
-Nenhum segredo entra no Git. A configuração fica em `~/.config/zeus/config.json`
-no computador que executa o Zeus, com permissão restrita ao usuário.
+O Zeus lê **`~/.config/zeus/config.json`**, e só. O arquivo
+`config/config.example.json`, dentro do repositório, é um modelo: está no Git,
+não é lido por ninguém e nunca deve receber token. Preencher o exemplo e
+estranhar que o token continua "ausente" é o erro mais fácil de cometer aqui.
+
+Em caso de dúvida, `./zeus check` mostra em `origem` qual arquivo foi lido.
 
 ```bash
 mkdir -p ~/.config/zeus
@@ -33,7 +37,7 @@ sobre o arquivo, o que permite testar um modelo sem editar configuração.
 
 ```bash
 ollama pull llama3.1:8b-instruct-q4_K_M
-PYTHONPATH=src python3 -m zeus check --modelo
+./zeus check --modelo
 ```
 
 A verificação falha quando o modelo pedido não está servido. Isso é
@@ -49,7 +53,10 @@ o cache em vez de reprocessar a persona a cada turno.
 
 ## Telegram
 
-Crie o bot no BotFather, mande uma mensagem para ele e pegue o `chat_id`:
+Crie o bot no BotFather, mande uma mensagem para ele e pegue o `chat_id`. O
+`chat_id` **não** é o número que aparece antes dos dois pontos no token: aquele
+é o identificador do próprio bot. O seu é outro, e vem do `getUpdates` abaixo,
+em `message.chat.id`, depois que você manda uma mensagem para o bot:
 
 ```bash
 curl -s "https://api.telegram.org/bot<SEU_TOKEN>/getUpdates" | python3 -m json.tool
@@ -58,7 +65,7 @@ curl -s "https://api.telegram.org/bot<SEU_TOKEN>/getUpdates" | python3 -m json.t
 Depois:
 
 ```bash
-PYTHONPATH=src python3 -m zeus check --canal
+./zeus check --canal
 ```
 
 Só a conversa configurada é aceita. Mensagem de terceiro é descartada e o
@@ -67,3 +74,10 @@ reiniciar, o Zeus não responde duas vezes a mensagem antiga.
 
 Sem token configurado, o Zeus roda normalmente: a agenda continua e o contato
 fica indisponível até o canal existir.
+
+## Se o token aparecer onde não devia
+
+Token exposto em arquivo versionado, em captura de tela ou em conversa deixa de
+ser secreto. No BotFather, `/revoke` invalida o antigo e entrega um novo na
+hora. Trocar o valor em `~/.config/zeus/config.json` basta; nada mais no
+projeto guarda essa informação.

@@ -1,4 +1,5 @@
 {
+  "_leia_me": "ESTE ARQUIVO E SO UM EXEMPLO E ESTA NO GIT. O Zeus nao le daqui. Copie para ~/.config/zeus/config.json e preencha la. Nunca escreva token neste arquivo.",
   "provedor": "ollama",
   "modelo": "llama3.1:8b-instruct-q4_K_M",
   "ollama_url": "http://127.0.0.1:11434",

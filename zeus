@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Atalho para rodar o Zeus de qualquer diretório.
+#
+# `python3 -m zeus` só funciona de dentro de src/, porque é lá que o pacote
+# está. Em vez de exigir PYTHONPATH em toda linha de comando, este script
+# descobre a raiz do repositório a partir do próprio caminho e monta o ambiente.
+set -euo pipefail
+raiz="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="$raiz/src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m zeus "$@"

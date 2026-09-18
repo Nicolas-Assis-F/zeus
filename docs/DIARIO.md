@@ -55,3 +55,10 @@ Três testes automatizados passaram nesta máquina: persistência e correção a
 - Geração a 9,8 tokens por segundo atende mensagem escrita. A leitura do prompt é o gargalo perceptível, porque o contexto do Zeus tem persona, fatos e turnos recentes.
 - Três correções a partir disso: a persona passou a ser encontrada mesmo quando o comando roda de dentro de `src/`, que antes caía na persona mínima sem avisar; o dado volátil foi para o fim do contexto, para o servidor reaproveitar o cache do prefixo; e o modelo passa a ficar carregado por `keep_alive`, em vez de recarregar 4,9 GB a cada mensagem.
 - Nenhuma decisão de modelo definitivo foi tomada. Falta comparar com um modelo de 3 a 4 bilhões que caiba inteiro na placa e avaliar a qualidade da persona nos dois.
+
+## 18 de setembro de 2026 — atrito de configuração
+
+- O token do Telegram foi preenchido em `config/config.example.json`, que está no Git e não é lido pelo programa. O `check` continuou mostrando "ausente" porque o Zeus lê `~/.config/zeus/config.json`. O exemplo passou a dizer isso dentro do próprio arquivo e o `check` passou a informar, em `origem`, qual arquivo foi lido de fato.
+- O `chat_id` usado era o número do próprio bot, que aparece antes dos dois pontos no token. O identificador da conversa é outro e vem do `getUpdates`. A documentação passou a avisar.
+- Os comandos só funcionavam de dentro de `src/`, porque é lá que o pacote vive. Foi adicionado o atalho `./zeus`, que descobre a raiz do repositório pelo próprio caminho e monta o `PYTHONPATH` sozinho.
+- Trinta testes passando.

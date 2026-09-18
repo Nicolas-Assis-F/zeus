@@ -31,6 +31,9 @@ class Config:
     turnos_de_conversa: int = 12
     intervalo_agenda: int = 30
     espera_telegram: int = 25
+    # Preenchido por carregar(): dizer de onde a configuração veio evita a
+    # confusão de editar um arquivo que o programa nunca lê.
+    origem: str = "nenhum arquivo lido"
 
     @property
     def canal_configurado(self) -> bool:
@@ -52,7 +55,8 @@ def carregar(caminho: Path = None) -> Config:
     """Lê o arquivo, depois o ambiente. O ambiente tem prioridade."""
     caminho = Path(caminho) if caminho else CAMINHO_PADRAO
     dados = {}
-    if caminho.exists():
+    existe = caminho.exists()
+    if existe:
         conteudo = json.loads(caminho.read_text(encoding="utf-8") or "{}")
         conhecidos = {campo.name for campo in fields(Config)}
         dados = {k: v for k, v in conteudo.items() if k in conhecidos}
@@ -71,4 +75,7 @@ def carregar(caminho: Path = None) -> Config:
             dados[campo.name] = float(bruto)
         else:
             dados[campo.name] = bruto
-    return Config(**dados)
+    dados.pop("origem", None)
+    config = Config(**dados)
+    config.origem = str(caminho) if existe else f"{caminho} (não existe; usando padrões)"
+    return config
