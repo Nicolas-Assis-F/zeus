@@ -8,7 +8,8 @@
 - Preparada a fundação Python: memória explícita SQLite, consulta, correção, remoção e processo de serviço com encerramento por sinal.
 - Documentados instalação, acesso SSH, clone, testes, serviço de usuário e atualização controlada por Git.
 - Nenhum modelo de IA, canal de mensagens, câmera ou controle doméstico foi conectado. Persona e iniciativa natural continuam como próxima entrega.
-- Repositório remoto e acesso SSH ao X99 ainda não configurados. Não há publicação nem deploy remoto.
+- Inicialmente não havia remoto. Nicolas criou `https://github.com/Nicolas-Assis-F/zeus.git` e forneceu o endereço; o clone local foi conectado como `origin`. O acesso SSH ao X99 e o deploy ainda estão pendentes.
+- A tentativa gráfica de gravar o USB encontrou dispositivo ocupado. O diagnóstico identificou Nautilus usando a partição antiga UBUNTU-SERV. O aplicativo foi encerrado normalmente e a desmontagem pelo UDisks concluiu com sucesso. Foi preparada gravação da ISO Desktop com validação de identidade do SanDisk e conferência SHA256 após a escrita; aguarda resultado da execução.
 
 ## Decisões
 

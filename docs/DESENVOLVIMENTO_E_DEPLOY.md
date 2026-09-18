@@ -4,11 +4,15 @@
 
 O computador de desenvolvimento contém código, documentação e testes. O X99 dedicado executa a versão aprovada e mantém o estado local do Zeus. Git transporta código; não transporta memória, bancos, gravações ou credenciais. SSH permite administrar o X99 a partir do computador de desenvolvimento.
 
-Ainda não existe endereço remoto deste repositório. Definir um repositório privado acessível pelas duas máquinas antes de executar o clone. Não inventar uma URL, publicar dados pessoais ou colocar tokens no endereço. O clone local para validação não equivale a publicação no GitHub.
+Nicolas criou o remoto `https://github.com/Nicolas-Assis-F/zeus.git`. Usar autenticação própria do Git ou chave SSH, sem colocar tokens no endereço. A visibilidade do repositório não foi alterada por esta sessão. Manter dados pessoais e credenciais fora do código publicado.
 
 ## Primeira execução no servidor
 
-Quando houver uma URL real, clonar o repositório para `~/zeus` usando o usuário criado na instalação. A configuração do serviço depende desse diretório; adaptar a unidade explicitamente se escolher outro local.
+Clonar o repositório para `~/zeus` usando o usuário criado na instalação. A configuração do serviço depende desse diretório; adaptar a unidade explicitamente se escolher outro local.
+
+```bash
+git clone https://github.com/Nicolas-Assis-F/zeus.git ~/zeus
+```
 
 No diretório clonado:
 

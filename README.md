@@ -32,4 +32,4 @@ Ctrl+C encerra o processo. Os dados ficam em `~/.local/state/zeus`, ou sob `XDG_
 - [Diário e decisões](docs/DIARIO.md)
 - `docs/referencia/`: plano mestre e histórico anterior, preservados como referência. As instruções atuais de instalação e execução estão nos guias acima.
 
-O repositório é local. Nenhum remoto foi criado ou publicado. Não há servidor configurado nesta etapa.
+Remoto criado por Nicolas: https://github.com/Nicolas-Assis-F/zeus.git. O clone local está conectado a esse endereço. A máquina dedicada ainda não foi configurada.
