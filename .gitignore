@@ -9,3 +9,5 @@ __pycache__/
 *.log
 data/
 .pytest_cache/
+config/config.json
+.config/

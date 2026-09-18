@@ -1,0 +1,173 @@
+"""Catálogo fixo de ferramentas. Nada fora desta lista é executável.
+
+O modelo propõe uma chamada; quem decide se ela existe, se os argumentos são
+válidos e o que acontece é este módulo. Texto lido pelo modelo nunca vira
+comando: um nome desconhecido devolve erro e o ciclo segue. Esta entrega não
+expõe nenhuma ação física, nenhuma tranca e nenhum dispositivo.
+"""
+
+from datetime import datetime, timezone
+
+from .guarda import MemoriaRecusada, checar_memoria
+from .tempo import MomentoInvalido, humano, interpretar
+
+
+def _ferramenta(nome, descricao, propriedades, obrigatorios):
+    return {
+        "type": "function",
+        "function": {
+            "name": nome,
+            "description": descricao,
+            "parameters": {
+                "type": "object",
+                "properties": propriedades,
+                "required": obrigatorios,
+            },
+        },
+    }
+
+
+CATALOGO = [
+    _ferramenta(
+        "lembrar_fato",
+        "Guarda um fato que Nicolas informou. Use apenas para informação que ele "
+        "declarou, nunca para conclusão sua. Não aceita valor financeiro.",
+        {
+            "chave": {"type": "string", "description": "Identificador curto, ex: tratamento"},
+            "valor": {"type": "string", "description": "O que foi informado"},
+            "estado": {"type": "string", "enum": ["confirmado", "hipotese"],
+                       "description": "confirmado quando ele afirmou; hipotese quando você deduziu"},
+        },
+        ["chave", "valor"],
+    ),
+    _ferramenta(
+        "consultar_fato",
+        "Consulta um fato na memória. Devolve desconhecido quando não existe.",
+        {"chave": {"type": "string"}},
+        ["chave"],
+    ),
+    _ferramenta(
+        "esquecer_fato",
+        "Remove um fato da memória ativa quando Nicolas pede para esquecer.",
+        {"chave": {"type": "string"}},
+        ["chave"],
+    ),
+    _ferramenta(
+        "agendar_pergunta",
+        "Agenda uma pergunta sua para um momento adequado, quando falta um dado "
+        "que muda uma decisão. Uma pergunta por assunto.",
+        {
+            "texto": {"type": "string", "description": "A pergunta como você vai fazê-la"},
+            "motivo": {"type": "string", "description": "Por que essa resposta importa"},
+            "quando": {"type": "string",
+                       "description": "ISO 8601, 'HH:MM', 'amanhã HH:MM' ou '+30m'"},
+        },
+        ["texto", "motivo", "quando"],
+    ),
+    _ferramenta(
+        "agendar_lembrete",
+        "Agenda um lembrete combinado com Nicolas para um horário.",
+        {
+            "texto": {"type": "string"},
+            "quando": {"type": "string",
+                       "description": "ISO 8601, 'HH:MM', 'amanhã HH:MM' ou '+30m'"},
+        },
+        ["texto", "quando"],
+    ),
+    _ferramenta(
+        "listar_pendencias",
+        "Lista perguntas em aberto e lembretes agendados.",
+        {},
+        [],
+    ),
+    _ferramenta(
+        "encerrar_pendencia",
+        "Encerra uma pergunta ou lembrete que já foi resolvido, para não cobrar de novo.",
+        {
+            "tipo": {"type": "string", "enum": ["pergunta", "lembrete"]},
+            "id": {"type": "integer"},
+        },
+        ["tipo", "id"],
+    ),
+]
+
+NOMES = {item["function"]["name"] for item in CATALOGO}
+
+
+class Ferramentas:
+    def __init__(self, store, relogio=None):
+        self.store = store
+        self.relogio = relogio or (lambda: datetime.now(timezone.utc))
+
+    def catalogo(self):
+        return CATALOGO
+
+    def executar(self, nome: str, argumentos: dict) -> dict:
+        if nome not in NOMES:
+            return {"erro": f"Ferramenta '{nome}' não existe. Nada foi executado."}
+        if not isinstance(argumentos, dict):
+            return {"erro": "Argumentos precisam vir como objeto."}
+        try:
+            return getattr(self, "_" + nome)(argumentos)
+        except (MemoriaRecusada, MomentoInvalido, ValueError) as erro:
+            return {"erro": str(erro)}
+
+    # ------------------------------------------------------------- memória
+    def _lembrar_fato(self, argumentos):
+        chave = str(argumentos.get("chave", "")).strip()
+        valor = str(argumentos.get("valor", "")).strip()
+        estado = argumentos.get("estado", "confirmado")
+        if estado not in ("confirmado", "hipotese"):
+            estado = "hipotese"
+        checar_memoria(chave, valor)
+        self.store.remember(chave, valor, "conversa", estado)
+        return {"guardado": chave, "estado": estado}
+
+    def _consultar_fato(self, argumentos):
+        chave = str(argumentos.get("chave", "")).strip()
+        fato = self.store.recall(chave)
+        if fato is None:
+            return {"chave": chave, "conhecido": False}
+        return {"chave": chave, "conhecido": True, "valor": fato["value"],
+                "estado": fato["estado"], "atualizado_em": fato["updated_at"]}
+
+    def _esquecer_fato(self, argumentos):
+        chave = str(argumentos.get("chave", "")).strip()
+        return {"chave": chave, "removido": self.store.forget(chave)}
+
+    # -------------------------------------------------------------- agenda
+    def _agendar_pergunta(self, argumentos):
+        quando = interpretar(str(argumentos.get("quando", "")), self.relogio())
+        identificador = self.store.criar_pergunta(
+            str(argumentos.get("texto", "")).strip(),
+            str(argumentos.get("motivo", "")).strip(),
+            quando,
+            em=self.relogio(),
+        )
+        return {"pergunta": identificador, "quando": humano(quando)}
+
+    def _agendar_lembrete(self, argumentos):
+        quando = interpretar(str(argumentos.get("quando", "")), self.relogio())
+        texto = str(argumentos.get("texto", "")).strip()
+        if not texto:
+            raise ValueError("Lembrete precisa de texto.")
+        identificador = self.store.agendar("lembrete", texto, quando)
+        return {"lembrete": identificador, "quando": humano(quando)}
+
+    def _listar_pendencias(self, argumentos):
+        return {
+            "perguntas": self.store.perguntas_abertas(),
+            "lembretes": self.store.agenda_pendente(),
+        }
+
+    def _encerrar_pendencia(self, argumentos):
+        tipo = argumentos.get("tipo")
+        try:
+            identificador = int(argumentos.get("id"))
+        except (TypeError, ValueError):
+            raise ValueError("id precisa ser um número.")
+        if tipo == "pergunta":
+            return {"encerrado": self.store.cancelar_pergunta(identificador)}
+        if tipo == "lembrete":
+            return {"encerrado": self.store.cancelar_agenda(identificador)}
+        raise ValueError("tipo precisa ser pergunta ou lembrete.")

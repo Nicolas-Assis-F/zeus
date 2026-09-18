@@ -2,7 +2,7 @@
 
 ## Equipamento e mídia
 
-X99 com Xeon E5-2670 v3, 32 GB RAM e GTX 1050 Ti de 4 GB. SSD do sistema informado como 128 GB e SSD secundário de 256 GB. Identificar modelo e capacidade no instalador antes de escolher o destino; a letra D: não será mantida como identificador no Linux.
+X99 com Xeon E5-2670 v3 de 24 threads, 30 GiB de RAM utilizáveis e GTX 1050 Ti de 4096 MiB, conferidos na máquina instalada em 18/09/2026. O sistema ficou no SSD de 111,8 GiB (`sdb`), com a partição EFI de 1 GiB; o SSD de 238,5 GiB (`sda`) tem uma partição e ainda não foi montado. Driver NVIDIA 580.178.04 com CUDA 13.0 ativo, e Python 3.14.4 no sistema. Identificar modelo e capacidade no instalador antes de escolher o destino; a letra D: não será mantida como identificador no Linux.
 
 Mídia escolhida por Nicolas: Ubuntu 26.04.1 Desktop amd64. Seu SHA256 foi comparado com o manifesto obtido por HTTPS do servidor oficial e coincidiu em 18/09/2026:
 

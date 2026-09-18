@@ -1,0 +1,13 @@
+{
+  "provedor": "ollama",
+  "modelo": "llama3.1:8b-instruct-q4_K_M",
+  "ollama_url": "http://127.0.0.1:11434",
+  "openrouter_chave": "",
+  "telegram_token": "",
+  "telegram_chat_id": "",
+  "persona": "config/persona.md",
+  "temperatura_conversa": 0.75,
+  "temperatura_decisao": 0.0,
+  "turnos_de_conversa": 12,
+  "intervalo_agenda": 30
+}

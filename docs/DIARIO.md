@@ -24,3 +24,25 @@
 ## Resultado dos testes
 
 Três testes automatizados passaram nesta máquina: persistência e correção após reabertura, remoção da memória ativa, entrada literal sem alteração de SQL, ausência de fatos desconhecidos e início/encerramento do processo preservando memória. O arquivo de serviço passou em `systemd-analyze --user verify`. Nenhum serviço foi instalado nesta máquina. Validação local não substitui testes no X99.
+
+## 18 de setembro de 2026 — Entrega 1
+
+- O X99 foi formatado e recebeu Ubuntu 26.04 Desktop. O clone do repositório e o workspace de execução foram criados pelo próprio Nicolas; a máquina só recebe clone e `git pull`.
+- Inventário conferido no hardware real, substituindo a suposição do escopo: Xeon E5-2670 v3, 24 threads, 30 GiB de RAM utilizáveis e 7 GiB de swap. O SSD de 111,8 GiB (`sdb`) tem o sistema e a EFI; o de 238,5 GiB (`sda`) está presente com uma partição e ainda não foi montado nem destinado.
+- O driver NVIDIA proprietário subiu: versão 580.178.04, CUDA 13.0, GTX 1050 Ti com 4096 MiB. O ambiente gráfico já ocupa por volta de 537 MiB dessa memória, restando aproximadamente 3,5 GiB para inferência.
+- Python do sistema é o 3.14.4. Endereço na rede local: 192.168.100.221.
+- Implementada a Entrega 1: ciclo com conversa e revisão deliberada, memória com estado epistêmico, episódios, fila de perguntas, agenda, persona em arquivo, catálogo fixo de ferramentas, provedores Ollama e OpenRouter com verificação de modelo e canal Telegram por long polling. Sem dependência externa.
+- Vinte e quatro testes automatizados passaram, incluindo a prova de presença de ponta a ponta com modelo e canal falsos. Nenhum teste fala com rede.
+- Nenhuma validação com modelo real, latência medida ou conversa longa de persona foi feita até aqui. Isso continua pendente e depende do Ollama instalado no X99.
+
+## Decisões — Entrega 1
+
+| Decisão | Estado | Motivo |
+| --- | --- | --- |
+| Biblioteca padrão apenas | Implementado | Deploy sem venv e sem quebra de dependência no servidor |
+| Persona em arquivo de configuração | Implementado | Ajustar tom sem tocar em código nem refazer deploy |
+| Telegram junto da Etapa 1 | Implementado | Fecha o ciclo de iniciativa e adianta a Etapa 2 |
+| Marca de envio antes do disparo | Implementado | Reinício não gera aviso duplicado; falha de canal não perde pendência |
+| Bloqueio financeiro na escrita do modelo | Implementado | Repete a regra dura nascida do envenenamento de memória anterior |
+| Modelo a usar no X99 | Pendente | Depende de medir tokens por segundo com a VRAM realmente livre |
+| Destino do SSD de 238,5 GiB | Pendente | Falta decidir entre estado, mídia e futuras gravações |

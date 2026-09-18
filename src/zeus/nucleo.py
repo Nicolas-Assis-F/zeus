@@ -1,0 +1,135 @@
+"""O ciclo do Zeus: perceber, contextualizar, decidir, comunicar, registrar.
+
+Esta entrega implementa o menor recorte que prova presença: conversa com
+persona e memória, pergunta agendada por decisão do próprio Zeus, envio no
+momento certo por um canal, resposta incorporada ao mesmo episódio e nenhum
+aviso duplicado depois de reinício.
+
+O que ainda não existe aqui está dito em voz alta: não há visão, telefonia,
+dispositivo doméstico nem pesquisa externa. O ciclo foi escrito para receber
+essas fontes sem ser reconstruído.
+"""
+
+import json
+from datetime import datetime, timezone
+
+MAXIMO_DE_RODADAS = 3
+
+
+class Zeus:
+    def __init__(self, store, provedor, persona, ferramentas, config,
+                 canal=None, relogio=None):
+        self.store = store
+        self.provedor = provedor
+        self.persona = persona
+        self.ferramentas = ferramentas
+        self.config = config
+        self.canal = canal
+        self.relogio = relogio or (lambda: datetime.now(timezone.utc))
+
+    # ------------------------------------------------------------ contexto
+    def _sistema(self):
+        return self.persona.sistema(
+            fatos=self.store.fatos(),
+            perguntas=self.store.perguntas_abertas(),
+            agenda=self.store.agenda_pendente(),
+            agora=self.relogio(),
+        )
+
+    def _historico(self):
+        mensagens = [{"role": "system", "content": self._sistema()}]
+        for turno in self.store.turnos(self.config.turnos_de_conversa):
+            papel = "assistant" if turno["papel"] == "zeus" else "user"
+            mensagens.append({"role": papel, "content": turno["texto"]})
+        return mensagens
+
+    # ------------------------------------------------------------ conversa
+    def conversar(self, texto: str, canal: str = "cli") -> str:
+        agora = self.relogio()
+        respondida = self._vincular_resposta(texto, agora)
+        self.store.registrar_turno(canal, "nicolas", texto, agora)
+
+        mensagens = self._historico()
+        if respondida:
+            mensagens.append({
+                "role": "system",
+                "content": f"A mensagem a seguir responde sua pergunta #{respondida}. "
+                           "Incorpore a resposta e não repita a pergunta.",
+            })
+        mensagens.append({"role": "user", "content": texto})
+
+        resposta = None
+        for _ in range(MAXIMO_DE_RODADAS):
+            resposta = self.provedor.conversar(
+                mensagens,
+                ferramentas=self.ferramentas.catalogo(),
+                temperatura=self.config.temperatura_conversa,
+            )
+            if not resposta.chamadas:
+                break
+            mensagens.append(self.provedor.mensagem_do_assistente(resposta))
+            for chamada in resposta.chamadas:
+                resultado = self.ferramentas.executar(chamada["nome"], chamada["argumentos"])
+                mensagens.append(self.provedor.mensagem_de_ferramenta(
+                    chamada, json.dumps(resultado, ensure_ascii=False)))
+
+        final = (resposta.texto if resposta else "").strip()
+        if not final:
+            final = "Registrei. Alguma coisa mais?"
+        self.store.registrar_turno(canal, "zeus", final, self.relogio())
+        return final
+
+    def _vincular_resposta(self, texto: str, agora):
+        """A resposta pertence ao episódio da pergunta, não a uma conversa solta."""
+        abertas = [p for p in self.store.perguntas_abertas() if p["situacao"] == "perguntada"]
+        if len(abertas) != 1:
+            return None
+        pergunta = abertas[0]
+        self.store.responder_pergunta(pergunta["id"], texto, agora)
+        return pergunta["id"]
+
+    # -------------------------------------------------------------- ciclo
+    def tick(self, agora=None):
+        """Revisão deliberada: o que venceu merece contato agora?"""
+        agora = agora or self.relogio()
+        if self.canal is None:
+            return []
+        enviados = []
+        for pergunta in self.store.perguntas_vencidas(agora):
+            chave = f"pergunta:{pergunta['id']}"
+            if not self.store.marcar_envio(chave, agora):
+                continue
+            if self._entregar(chave, pergunta["texto"]):
+                self.store.marcar_perguntada(pergunta["id"], agora)
+                self.store.registrar_turno("saida", "zeus", pergunta["texto"], agora)
+                enviados.append({"tipo": "pergunta", "id": pergunta["id"],
+                                 "texto": pergunta["texto"]})
+        for item in self.store.agenda_vencida(agora):
+            chave = f"lembrete:{item['id']}"
+            if not self.store.marcar_envio(chave, agora):
+                continue
+            if self._entregar(chave, item["texto"]):
+                self.store.concluir_agenda(item["id"], agora)
+                self.store.registrar_turno("saida", "zeus", item["texto"], agora)
+                enviados.append({"tipo": "lembrete", "id": item["id"],
+                                 "texto": item["texto"]})
+        return enviados
+
+    def _entregar(self, chave: str, texto: str) -> bool:
+        try:
+            self.canal.enviar(texto)
+            return True
+        except Exception:
+            # A marca é desfeita para que a pendência continue valendo na
+            # próxima revisão. Falha de entrega não pode virar assunto perdido.
+            self.store.desmarcar_envio(chave)
+            return False
+
+    # ------------------------------------------------------------ percepção
+    def perceber(self, tipo: str, resumo: str, dados: dict = None,
+                 simulado: bool = False) -> int:
+        agora = self.relogio()
+        episodio = self.store.abrir_episodio(tipo, resumo, simulado, agora)
+        self.store.registrar_evento(episodio, "simulado" if simulado else "sistema",
+                                    tipo, dados or {}, agora)
+        return episodio
