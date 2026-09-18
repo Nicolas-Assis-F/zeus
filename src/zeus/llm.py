@@ -56,11 +56,14 @@ def _mesmo_modelo(pedido: str, servido: str) -> bool:
 class ProvedorOllama:
     nome = "ollama"
 
-    def __init__(self, url: str, modelo: str, transporte=None, timeout=TEMPO_LIMITE):
+    def __init__(self, url: str, modelo: str, transporte=None, timeout=TEMPO_LIMITE,
+                 keep_alive: str = "30m"):
         self.url = url.rstrip("/")
         self.modelo = modelo
         self.transporte = transporte or transporte_http
         self.timeout = timeout
+        # Recarregar 4,9 GB a cada mensagem custa mais que a resposta inteira.
+        self.keep_alive = keep_alive
 
     def verificar(self) -> str:
         dados = self.transporte("GET", f"{self.url}/api/tags", None, None, self.timeout)
@@ -78,6 +81,7 @@ class ProvedorOllama:
             "model": self.modelo,
             "messages": mensagens,
             "stream": False,
+            "keep_alive": self.keep_alive,
             "options": {"temperature": temperatura},
         }
         if ferramentas:
@@ -184,7 +188,8 @@ class ProvedorOpenRouter:
 
 def criar_provedor(config, transporte=None):
     if config.provedor == "ollama":
-        return ProvedorOllama(config.ollama_url, config.modelo, transporte)
+        return ProvedorOllama(config.ollama_url, config.modelo, transporte,
+                              keep_alive=config.keep_alive)
     if config.provedor == "openrouter":
         return ProvedorOpenRouter(config.openrouter_url, config.modelo,
                                   config.openrouter_chave, transporte)

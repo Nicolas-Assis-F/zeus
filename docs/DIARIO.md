@@ -46,3 +46,12 @@ Três testes automatizados passaram nesta máquina: persistência e correção a
 | Bloqueio financeiro na escrita do modelo | Implementado | Repete a regra dura nascida do envenenamento de memória anterior |
 | Modelo a usar no X99 | Pendente | Depende de medir tokens por segundo com a VRAM realmente livre |
 | Destino do SSD de 238,5 GiB | Pendente | Falta decidir entre estado, mídia e futuras gravações |
+
+## 18 de setembro de 2026 — primeira medição com modelo real
+
+- Ollama instalado no X99 e GPU reconhecida na instalação. O `llama3.1:8b-instruct-q4_K_M` foi baixado, 4,9 GB.
+- Medição com `--verbose`: leitura do prompt a 32,11 tokens por segundo e geração a 9,81 tokens por segundo, com o modelo já carregado. O 8B não cabe inteiro nos 4 GiB da placa, então parte das camadas roda na CPU.
+- `python3 -m zeus check --modelo` respondeu com o modelo servido igual ao pedido: a verificação obrigatória passou contra o Ollama real, não só contra o dublê de teste.
+- Geração a 9,8 tokens por segundo atende mensagem escrita. A leitura do prompt é o gargalo perceptível, porque o contexto do Zeus tem persona, fatos e turnos recentes.
+- Três correções a partir disso: a persona passou a ser encontrada mesmo quando o comando roda de dentro de `src/`, que antes caía na persona mínima sem avisar; o dado volátil foi para o fim do contexto, para o servidor reaproveitar o cache do prefixo; e o modelo passa a ficar carregado por `keep_alive`, em vez de recarregar 4,9 GB a cada mensagem.
+- Nenhuma decisão de modelo definitivo foi tomada. Falta comparar com um modelo de 3 a 4 bilhões que caiba inteiro na placa e avaliar a qualidade da persona nos dois.

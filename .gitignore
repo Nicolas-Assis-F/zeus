@@ -11,3 +11,4 @@ data/
 .pytest_cache/
 config/config.json
 .config/
+*.patch

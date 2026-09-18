@@ -23,7 +23,8 @@ sobre o arquivo, o que permite testar um modelo sem editar configuração.
 | `openrouter_chave` | Chave do OpenRouter, quando o provedor for remoto |
 | `telegram_token` | Token do bot criado no BotFather |
 | `telegram_chat_id` | Conversa autorizada. Nenhuma outra é aceita |
-| `persona` | Caminho do `persona.md` |
+| `keep_alive` | Quanto tempo o Ollama mantém o modelo carregado |
+| `persona` | Caminho do `persona.md`, relativo à raiz do repositório ou absoluto |
 | `temperatura_conversa` | 0.75 por padrão, para a conversa ter vida |
 | `temperatura_decisao` | 0.0, para decisão e roteamento serem estáveis |
 | `turnos_de_conversa` | Quantos turnos recentes entram no contexto |
@@ -38,6 +39,13 @@ PYTHONPATH=src python3 -m zeus check --modelo
 A verificação falha quando o modelo pedido não está servido. Isso é
 intencional: já aconteceu de um servidor entregar variante diferente e quebrar
 o uso de ferramentas em silêncio.
+
+Medição no X99 em 18/09/2026, com o 8B em quantização q4_K_M dividido entre GPU
+e CPU: 32 tokens por segundo na leitura do prompt e 9,8 na geração. A geração
+serve para mensagem escrita. A leitura lenta do prompt é o que dói, e por isso
+duas coisas importam: `keep_alive` mantém o modelo carregado entre mensagens, e
+o contexto foi montado com a parte estável primeiro, para o servidor reaproveitar
+o cache em vez de reprocessar a persona a cada turno.
 
 ## Telegram
 

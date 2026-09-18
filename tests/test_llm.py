@@ -40,6 +40,11 @@ class VerificacaoDeModelo(unittest.TestCase):
         self.assertEqual(resposta.chamadas[0]["nome"], "agendar_lembrete")
         self.assertEqual(resposta.chamadas[0]["argumentos"]["texto"], "creatina")
 
+    def test_modelo_fica_carregado_entre_mensagens(self):
+        transporte = transporte_roteirizado([("/api/chat", {"model": "zeus", "message": {"content": "ok"}})])
+        ProvedorOllama("http://x", "zeus", transporte, keep_alive="1h").conversar([])
+        self.assertEqual(transporte.chamadas[-1]["corpo"]["keep_alive"], "1h")
+
     def test_temperatura_vai_no_corpo(self):
         transporte = transporte_roteirizado([("/api/chat", {"model": "zeus", "message": {"content": "ok"}})])
         ProvedorOllama("http://x", "zeus", transporte).conversar([], temperatura=0.0)

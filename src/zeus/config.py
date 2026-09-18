@@ -24,6 +24,7 @@ class Config:
     openrouter_chave: str = ""
     telegram_token: str = ""
     telegram_chat_id: str = ""
+    keep_alive: str = "30m"
     persona: str = "config/persona.md"
     temperatura_conversa: float = 0.75
     temperatura_decisao: float = 0.0
