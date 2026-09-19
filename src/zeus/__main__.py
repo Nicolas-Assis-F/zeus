@@ -24,6 +24,7 @@ from .execucao import CaixaDeEntrada, FalaEmSegundoPlano, RecepcaoTelegram
 from .llm import ErroDeModelo, criar_provedor
 from .nucleo import Zeus
 from .persona import Persona
+from .pesquisa import Pesquisa
 from .ouvidos import Ouvidos
 from .store import Store
 from .voz import Voz
@@ -66,13 +67,24 @@ def montar(args):
     config = carregar_config(getattr(args, "config", None))
     store = Store(args.state_dir.expanduser())
     persona = Persona.carregar(config.persona)
-    ferramentas = Ferramentas(store)
+    pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
+    ferramentas = Ferramentas(store, pesquisa=pesquisa)
     canal = None
     if config.canal_configurado:
         from .canais import CanalTelegram
         canal = CanalTelegram(config.telegram_token, config.telegram_chat_id, store,
                               espera=config.espera_telegram)
     return config, store, Zeus(store, None, persona, ferramentas, config, canal)
+
+
+def montar_pesquisa(config, estado):
+    """Pesquisa é escolha explícita: sem provedor configurado, ela não existe."""
+    base = config.pesquisa_url or "https://html.duckduckgo.com/html/"
+    return Pesquisa(provedor=config.pesquisa_provedor, url_base=base,
+                    timeout=config.pesquisa_timeout,
+                    cache_minutos=config.pesquisa_cache_minutos,
+                    maximo_de_fontes=config.pesquisa_max_fontes,
+                    destino=Path(estado) / "pesquisa")
 
 
 def montar_voz(config):
@@ -175,6 +187,7 @@ def main():
             emit("storage_check", version=__version__, storage=integrity,
                  modelo=modelo, canal=canal, voz=voz.diagnostico(),
                  ouvidos=ouvidos.diagnostico(),
+                 pesquisa=montar_pesquisa(config, args.state_dir.expanduser()).diagnostico(),
                  hud="configurada" if config.chave_hud else "sem chave definida",
                  config=config.sem_segredos())
             return 0 if integrity == "ok" and modelo_verificado else 1
@@ -386,7 +399,9 @@ def executar(zeus, store, config):
                 geracao = fala.invalidar() if fala else 0
                 if hud is not None:
                     hud.publicar("situacao", estado="pensando", detalhe="recebido", geracao=geracao)
-                zeus.capacidades = {"voz": voz.disponivel(), "ouvidos": ouvidos.disponivel()}
+                zeus.capacidades = {"voz": voz.disponivel(), "ouvidos": ouvidos.disponivel(),
+                                    "pesquisa": zeus.ferramentas.pesquisa.disponivel()
+                                    if zeus.ferramentas.pesquisa else False}
                 if pedido.get("tipo") == "telegram":
                     recebidas = pedido["mensagens"]
                     try:

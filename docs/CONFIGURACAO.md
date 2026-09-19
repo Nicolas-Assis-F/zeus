@@ -29,6 +29,8 @@ sobre o arquivo, o que permite testar um modelo sem editar configuração.
 | `telegram_token` | Token do bot criado no BotFather |
 | `telegram_chat_id` | Conversa autorizada. Nenhuma outra é aceita |
 | `keep_alive` | Quanto tempo o Ollama mantém o modelo carregado |
+| `pesquisa_provedor` | `nenhum`, `duckduckgo` ou `searxng` — ver docs/PESQUISA.md |
+| `pesquisa_url` | Endereço do SearXNG próprio, quando for o provedor |
 | `escuta_modelo` | Tamanho do Whisper para a escuta local |
 | `hud_tls` | Sobe a interface em https, necessário para o microfone |
 | `persona` | Caminho do `persona.md`, relativo à raiz do repositório ou absoluto |

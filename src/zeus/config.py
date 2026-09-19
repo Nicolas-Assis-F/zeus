@@ -27,6 +27,11 @@ class Config:
     modelo_conversa: str = ""
     keep_alive: str = "30m"
     limite_de_resposta: int = 320
+    pesquisa_provedor: str = "nenhum"
+    pesquisa_url: str = ""
+    pesquisa_timeout: int = 10
+    pesquisa_cache_minutos: int = 30
+    pesquisa_max_fontes: int = 4
     persona: str = "config/persona.md"
     hud_host: str = "0.0.0.0"
     hud_porta: int = 8770

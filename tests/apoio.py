@@ -26,6 +26,9 @@ class ProvedorFalso:
     def __init__(self, roteiro):
         self.roteiro = list(roteiro)
         self.recebidas = []
+        # Guarda o catálogo de cada rodada: é assim que um teste prova que as
+        # ferramentas saíram da conversa depois de entrar dado externo.
+        self.catalogos = []
         self.modelo = "modelo-falso"
 
     def verificar(self):
@@ -33,6 +36,7 @@ class ProvedorFalso:
 
     def conversar(self, mensagens, ferramentas=None, temperatura=0.0):
         self.recebidas.append(mensagens)
+        self.catalogos.append(ferramentas)
         if not self.roteiro:
             from zeus.llm import Resposta
             return Resposta("Sem mais nada a dizer.", [], self.modelo)
