@@ -14,22 +14,76 @@ página só recebe a chave que já estava na URL que ele abriu.
 import hmac
 import json
 import queue
+import shutil
+import socket
+import ssl
+import subprocess
 import threading
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 PAGINA = Path(__file__).resolve().parent / "index.html"
 LIMITE_DE_MENSAGEM = 4000
+LIMITE_DE_AUDIO = 12 * 1024 * 1024
+
+
+def endereco_local() -> str:
+    """Descobre o IP que a casa enxerga, sem depender de configuração."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as tomada:
+            # UDP não envia nada ao conectar: isto só pergunta ao sistema qual
+            # interface sairia pela rota padrão, e lê o endereço dela.
+            tomada.connect(("8.8.8.8", 80))
+            return tomada.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
+def garantir_certificado(diretorio: Path, ip: str = ""):
+    """Gera um certificado próprio quando não existe.
+
+    O navegador só libera o microfone em origem segura. Sem TLS, o botão de
+    falar simplesmente não existe fora de localhost, e o Zeus fica sem ouvidos
+    justamente no aparelho que tem microfone. O certificado é autoassinado: o
+    navegador avisa uma vez, você aceita, e a chave nunca sai da máquina."""
+    diretorio = Path(diretorio)
+    diretorio.mkdir(parents=True, exist_ok=True, mode=0o700)
+    certificado = diretorio / "zeus-cert.pem"
+    chave = diretorio / "zeus-chave.pem"
+    if certificado.exists() and chave.exists():
+        return certificado, chave
+    openssl = shutil.which("openssl")
+    if not openssl:
+        return None, None
+    ip = ip or endereco_local()
+    try:
+        subprocess.run([
+            openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(chave), "-out", str(certificado),
+            "-days", "3650", "-subj", "/CN=zeus",
+            "-addext", f"subjectAltName=IP:{ip},IP:127.0.0.1,DNS:zeus,DNS:localhost",
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=True)
+    except (subprocess.SubprocessError, OSError):
+        return None, None
+    chave.chmod(0o600)
+    return certificado, chave
 
 
 class ServidorHUD:
     def __init__(self, enfileirar, voz=None, chave: str = "",
-                 host: str = "0.0.0.0", porta: int = 8770, estado=None):
+                 host: str = "0.0.0.0", porta: int = 8770, estado=None,
+                 pasta_de_escuta=None, certificado=None, chave_tls=None):
         if not chave:
             raise ValueError("A HUD exige uma chave de acesso.")
-        self.enfileirar = enfileirar    # callable(texto)
+        self.enfileirar = enfileirar    # callable(dict)
         self._retrato = dict(estado or {"tipo": "estado"})
+        self.pasta_de_escuta = Path(pasta_de_escuta) if pasta_de_escuta else None
+        if self.pasta_de_escuta:
+            self.pasta_de_escuta.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.certificado = certificado
+        self.chave_tls = chave_tls
         self.voz = voz
         self.chave = chave
         self.host = host
@@ -80,9 +134,17 @@ class ServidorHUD:
         return bool(chave) and hmac.compare_digest(str(chave), self.chave)
 
     # ------------------------------------------------------------ operação
+    @property
+    def seguro(self) -> bool:
+        return bool(self.certificado and self.chave_tls)
+
     def iniciar(self):
         servidor = ThreadingHTTPServer((self.host, self.porta), _construir(self))
         servidor.daemon_threads = True
+        if self.seguro:
+            contexto = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            contexto.load_cert_chain(str(self.certificado), str(self.chave_tls))
+            servidor.socket = contexto.wrap_socket(servidor.socket, server_side=True)
         self._servidor = servidor
         self._thread = threading.Thread(target=servidor.serve_forever, daemon=True)
         self._thread.start()
@@ -121,6 +183,30 @@ def _construir(hud: ServidorHUD):
         def _json(self, codigo, dados):
             self._responder(codigo, json.dumps(dados, ensure_ascii=False).encode("utf-8"))
 
+        def _tamanho(self, limite):
+            try:
+                tamanho = int(self.headers.get("Content-Length") or 0)
+                if tamanho < 0:
+                    raise ValueError
+            except ValueError:
+                self.close_connection = True
+                self._json(400, {"erro": "tamanho inválido"})
+                return None
+            if tamanho > limite:
+                self.close_connection = True
+                self._json(413, {"erro": "conteúdo longo demais"})
+                return None
+            return tamanho
+
+        def _enfileirar(self, pedido):
+            try:
+                hud.enfileirar(pedido)
+            except queue.Full:
+                if pedido.get("arquivo"):
+                    Path(pedido["arquivo"]).unlink(missing_ok=True)
+                return self._json(503, {"erro": "fila cheia; tente novamente em instantes"})
+            return self._json(202, {"recebido": True})
+
         # ----------------------------------------------------------- rotas
         def do_GET(self):
             caminho = urlparse(self.path).path
@@ -146,20 +232,42 @@ def _construir(hud: ServidorHUD):
             caminho = urlparse(self.path).path
             if not hud.autorizado(self._chave()):
                 return self._json(401, {"erro": "chave inválida"})
+            if caminho == "/escuta":
+                return self._escuta()
             if caminho != "/mensagem":
                 return self._json(404, {"erro": "rota desconhecida"})
-            tamanho = int(self.headers.get("Content-Length") or 0)
-            if tamanho > LIMITE_DE_MENSAGEM:
-                return self._json(413, {"erro": "mensagem longa demais"})
+            tamanho = self._tamanho(LIMITE_DE_MENSAGEM)
+            if tamanho is None:
+                return
             try:
                 dados = json.loads(self.rfile.read(tamanho) or b"{}")
-                texto = str(dados.get("texto", "")).strip()
+                if not isinstance(dados, dict) or not isinstance(dados.get("texto", ""), str):
+                    raise ValueError
+                texto = dados.get("texto", "").strip()
             except (ValueError, UnicodeDecodeError):
                 return self._json(400, {"erro": "corpo inválido"})
             if not texto:
                 return self._json(400, {"erro": "mensagem vazia"})
-            hud.enfileirar(texto[:LIMITE_DE_MENSAGEM])
-            return self._json(202, {"recebido": True})
+            return self._enfileirar({"tipo": "texto", "texto": texto[:LIMITE_DE_MENSAGEM]})
+
+        def _escuta(self):
+            if hud.pasta_de_escuta is None:
+                return self._json(503, {"erro": "escuta desligada"})
+            tamanho = self._tamanho(LIMITE_DE_AUDIO)
+            if tamanho is None:
+                return
+            if tamanho <= 0:
+                return self._json(400, {"erro": "áudio vazio"})
+            arquivo = hud.pasta_de_escuta / f"{uuid.uuid4().hex}.webm"
+            corpo = self.rfile.read(tamanho)
+            if len(corpo) != tamanho:
+                self.close_connection = True
+                return self._json(400, {"erro": "áudio incompleto"})
+            arquivo.write_bytes(corpo)
+            arquivo.chmod(0o600)
+            # A transcrição acontece no laço principal: o modelo de escuta é
+            # um só e não deve ser usado por duas threads ao mesmo tempo.
+            return self._enfileirar({"tipo": "audio", "arquivo": str(arquivo)})
 
         def _fluxo(self):
             fila = hud._assinar()

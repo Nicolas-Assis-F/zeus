@@ -21,13 +21,16 @@ sobre o arquivo, o que permite testar um modelo sem editar configuração.
 
 | Chave | Para que serve |
 | --- | --- |
-| `provedor` | `ollama` (local) ou `openrouter` (remoto, só texto) |
+| `provedor` | `ollama` (local), `openrouter` (remoto) ou `hibrido` |
+| `modelo_conversa` | No híbrido, o modelo remoto que conduz a conversa |
 | `modelo` | Nome exato do modelo. É verificado antes de cada execução |
 | `ollama_url` | Endereço do Ollama, normalmente `http://127.0.0.1:11434` |
 | `openrouter_chave` | Chave do OpenRouter, quando o provedor for remoto |
 | `telegram_token` | Token do bot criado no BotFather |
 | `telegram_chat_id` | Conversa autorizada. Nenhuma outra é aceita |
 | `keep_alive` | Quanto tempo o Ollama mantém o modelo carregado |
+| `escuta_modelo` | Tamanho do Whisper para a escuta local |
+| `hud_tls` | Sobe a interface em https, necessário para o microfone |
 | `persona` | Caminho do `persona.md`, relativo à raiz do repositório ou absoluto |
 | `temperatura_conversa` | 0.75 por padrão, para a conversa ter vida |
 | `temperatura_decisao` | 0.0, para decisão e roteamento serem estáveis |
@@ -81,3 +84,42 @@ Token exposto em arquivo versionado, em captura de tela ou em conversa deixa de
 ser secreto. No BotFather, `/revoke` invalida o antigo e entrega um novo na
 hora. Trocar o valor em `~/.config/zeus/config.json` basta; nada mais no
 projeto guarda essa informação.
+
+## Híbrido seletivo
+
+`provedor: "hibrido"` divide o trabalho como o plano mestre propõe: o modelo
+local decide e usa ferramenta a temperatura zero, o remoto conduz a conversa.
+
+```json
+"provedor": "hibrido",
+"modelo": "llama3.1:8b-instruct-q4_K_M",
+"modelo_conversa": "nousresearch/hermes-3-llama-3.1-70b",
+"openrouter_chave": "..."
+```
+
+Memória, agenda e decisão continuam em casa. O que sai é o texto da conversa, e
+só porque essa escolha foi feita de propósito. Nenhum áudio e nenhuma imagem
+são enviados por consequência disso.
+
+## Escolher modelo com número, não com impressão
+
+```bash
+./zeus medir --modelos llama3.1:8b-instruct-q4_K_M,qwen2.5:7b-instruct --repeticoes 3
+```
+
+Para cada modelo ele mede três coisas: quanto tempo até a primeira palavra,
+quantos tokens por segundo depois dela, e quantas vezes ele acerta a chamada de
+ferramenta quando a frase pede uma. Um modelo veloz que erra a chamada não
+serve; um certeiro que demora meio minuto também não.
+
+## Contexto transmitido no híbrido
+
+Ao escolher o híbrido, o provedor remoto recebe as mensagens fornecidas ao modelo:
+persona, exemplos, histórico recente, fatos e pendências inseridos no contexto,
+e resultados de ferramentas usados na resposta. O banco fica local, mas trechos
+dele podem sair no prompt. Não interpretar “texto da conversa” como somente a
+última frase digitada. O híbrido não foi ativado por esta revisão.
+
+O modo local continua padrão. A tarefa de roteamento do plano mestre deve
+acrescentar seleção e redução explícita desse contexto, com uma avaliação
+comparando qualidade, custo e latência reais.

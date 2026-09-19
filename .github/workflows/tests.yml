@@ -1,0 +1,24 @@
+name: Verificar Zeus
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.12', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Testes sem serviços externos
+        run: PYTHONPATH=src python -m unittest discover -s tests -v
+      - name: Sintaxe da interface
+        run: |
+          python -c "from pathlib import Path; s=Path('src/zeus/hud/index.html').read_text(); Path('/tmp/zeus-hud.js').write_text(s.split('<script>')[1].split('</script>')[0])"
+          node --check /tmp/zeus-hud.js

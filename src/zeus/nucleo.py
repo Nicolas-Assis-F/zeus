@@ -28,6 +28,7 @@ class Zeus:
         self.ferramentas = ferramentas
         self.config = config
         self.canal = canal
+        self.capacidades = {}
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
 
     # ------------------------------------------------------------ contexto
@@ -37,25 +38,31 @@ class Zeus:
             perguntas=self.store.perguntas_abertas(),
             agenda=self.store.agenda_pendente(),
             agora=self.relogio(),
+            capacidades=self.capacidades, incluir_persona=False,
         )
 
     def _historico(self):
         # Ordem pensada para o cache do servidor e para o tom: persona e
         # exemplos primeiro, porque não mudam entre turnos; conversa depois.
-        mensagens = [{"role": "system", "content": self._sistema()}]
+        mensagens = [{"role": "system", "content": self.persona.instrucao()}]
         mensagens.extend(self.persona.exemplos())
         for turno in self.store.turnos(self.config.turnos_de_conversa):
             papel = "assistant" if turno["papel"] == "zeus" else "user"
             mensagens.append({"role": papel, "content": turno["texto"]})
+        mensagens.append({"role": "system", "content": self._sistema()})
         return mensagens
 
     # ------------------------------------------------------------ conversa
-    def conversar(self, texto: str, canal: str = "cli") -> str:
+    def conversar(self, texto: str, canal: str = "cli", ao_receber=None) -> str:
+        """Uma troca. `ao_receber` recebe cada pedaço conforme o modelo escreve.
+
+        Um pedaço `None` significa descartar o que já foi mostrado: aconteceu
+        de o modelo começar a escrever e então decidir usar uma ferramenta, e
+        o rascunho descartado não pode ficar na tela como se fosse resposta."""
         agora = self.relogio()
         respondida = self._vincular_resposta(texto, agora)
-        self.store.registrar_turno(canal, "nicolas", texto, agora)
-
         mensagens = self._historico()
+        self.store.registrar_turno(canal, "nicolas", texto, agora)
         if respondida:
             mensagens.append({
                 "role": "system",
@@ -65,23 +72,37 @@ class Zeus:
         mensagens.append({"role": "user", "content": texto})
 
         resposta = None
+        em_fluxo = ao_receber is not None and hasattr(self.provedor, "conversar_em_fluxo")
         for _ in range(MAXIMO_DE_RODADAS):
-            resposta = self.provedor.conversar(
-                mensagens,
-                ferramentas=self.ferramentas.catalogo(),
-                temperatura=self.config.temperatura_conversa,
-            )
+            if em_fluxo:
+                resposta = self.provedor.conversar_em_fluxo(
+                    mensagens,
+                    ferramentas=self.ferramentas.catalogo(),
+                    temperatura=self.config.temperatura_conversa,
+                    ao_receber=ao_receber,
+                )
+            else:
+                resposta = self.provedor.conversar(
+                    mensagens,
+                    ferramentas=self.ferramentas.catalogo(),
+                    temperatura=self.config.temperatura_conversa,
+                )
             if not resposta.chamadas:
                 break
+            if em_fluxo:
+                ao_receber(None)  # o que foi mostrado era rascunho
             mensagens.append(self.provedor.mensagem_do_assistente(resposta))
             for chamada in resposta.chamadas:
                 resultado = self.ferramentas.executar(chamada["nome"], chamada["argumentos"])
                 mensagens.append(self.provedor.mensagem_de_ferramenta(
                     chamada, json.dumps(resultado, ensure_ascii=False)))
 
-        final = limpar_resposta(resposta.texto if resposta else "")
+        bruto = resposta.texto if resposta else ""
+        final = limpar_resposta(bruto)
         if not final:
             final = SEM_RESPOSTA
+        if em_fluxo and final != bruto.strip():
+            ao_receber(None)  # a limpeza mexeu no texto; a tela precisa do final
         self.store.registrar_turno(canal, "zeus", final, self.relogio())
         return final
 

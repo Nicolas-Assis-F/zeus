@@ -10,6 +10,7 @@ capacidade ausente é dita em voz alta, nunca simulada.
 """
 
 import hashlib
+import os
 import shutil
 import subprocess
 import tempfile
@@ -42,19 +43,25 @@ class Voz:
         if not self.disponivel() or not texto.strip():
             return None
         recorte = texto.strip()[: self.limite]
-        nome = hashlib.sha256((str(self.modelo) + recorte).encode("utf-8")).hexdigest()[:24]
+        nome = hashlib.sha256((str(self.modelo) + str(self.modelo.stat().st_mtime_ns) + recorte).encode("utf-8")).hexdigest()[:24]
         arquivo = self.destino / f"{nome}.wav"
-        if arquivo.exists():
+        if arquivo.exists() and arquivo.stat().st_size > 44:
             return arquivo
+        fd, nome_temporario = tempfile.mkstemp(suffix=".wav", dir=self.destino)
+        os.close(fd)
+        temporario = Path(nome_temporario)
         try:
             subprocess.run(
-                [self.binario, "--model", str(self.modelo), "--output_file", str(arquivo)],
+                [self.binario, "--model", str(self.modelo), "--output_file", str(temporario)],
                 input=recorte.encode("utf-8"),
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 timeout=120, check=True,
             )
+            if temporario.stat().st_size <= 44:
+                return None
+            os.replace(temporario, arquivo)
+            return arquivo
         except (subprocess.SubprocessError, OSError):
-            if arquivo.exists():
-                arquivo.unlink()
             return None
-        return arquivo if arquivo.exists() else None
+        finally:
+            temporario.unlink(missing_ok=True)

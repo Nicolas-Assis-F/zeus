@@ -90,3 +90,33 @@ Isso preserva código e estado. Não desativar linger automaticamente: outros se
 ## Interface futura
 
 Uma interface web poderá ser hospedada no Zeus e aberta no computador de desenvolvimento. O servidor não precisa de ambiente gráfico para servir essa interface. Quando essa funcionalidade for implementada, definir autenticação e acesso antes de disponibilizá-la fora da própria máquina.
+
+## Atualização para a versão 0.3.0
+
+No clone de execução do X99, com árvore limpa, anotar a revisão atual antes:
+
+```bash
+git status --short
+git rev-parse HEAD
+git pull --ff-only origin main
+bash deploy/validar.sh
+```
+
+A validação roda a suíte e confere o modelo real. Não instala pacotes, modifica
+configuração nem altera dados. Para reiniciar um serviço já configurado:
+
+```bash
+bash deploy/validar.sh --reiniciar
+```
+
+O script recusa reiniciar se `WorkingDirectory` da unidade não for esse clone.
+Se usar venv, alinhar o interpretador de `ExecStart` com o utilizado nos testes;
+o script usa `.venv/bin/python` quando existe, ou `ZEUS_PYTHON` quando definido.
+Se o Zeus roda em terminal, encerrar essa execução e iniciar `./zeus run` no
+mesmo ambiente virtual. Não iniciar dois consumidores Telegram em paralelo.
+
+Depois, conferir texto, voz, escuta, um lembrete e um reinício. Registrar os
+resultados na issue de validação no X99. A publicação no GitHub não prova deploy
+nem validação de hardware. Para retorno à versão anterior, usar a revisão anotada
+em uma checkout limpa e reiniciar conscientemente; nunca usar reset na cópia
+compartilhada com outro agente. Esta entrega não altera o esquema do banco.

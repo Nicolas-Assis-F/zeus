@@ -50,3 +50,14 @@ class Canal(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ErrosSemSegredos(unittest.TestCase):
+    def test_erro_de_transporte_nao_revela_token(self):
+        from zeus.canais.telegram import CanalTelegram, ErroDeCanal
+        def falhar(*args):
+            raise RuntimeError("https://api.telegram.org/botSEGREDO/sendMessage")
+        canal = CanalTelegram("SEGREDO", "123", transporte=falhar)
+        with self.assertRaises(ErroDeCanal) as erro:
+            canal.enviar("oi")
+        self.assertNotIn("SEGREDO", str(erro.exception))
