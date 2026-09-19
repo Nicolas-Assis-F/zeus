@@ -28,6 +28,7 @@ class Zeus:
         self.ferramentas = ferramentas
         self.config = config
         self.canal = canal
+        self.capacidades = {}
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
 
     # ------------------------------------------------------------ contexto
@@ -37,16 +38,18 @@ class Zeus:
             perguntas=self.store.perguntas_abertas(),
             agenda=self.store.agenda_pendente(),
             agora=self.relogio(),
+            capacidades=self.capacidades, incluir_persona=False,
         )
 
     def _historico(self):
         # Ordem pensada para o cache do servidor e para o tom: persona e
         # exemplos primeiro, porque não mudam entre turnos; conversa depois.
-        mensagens = [{"role": "system", "content": self._sistema()}]
+        mensagens = [{"role": "system", "content": self.persona.instrucao()}]
         mensagens.extend(self.persona.exemplos())
         for turno in self.store.turnos(self.config.turnos_de_conversa):
             papel = "assistant" if turno["papel"] == "zeus" else "user"
             mensagens.append({"role": papel, "content": turno["texto"]})
+        mensagens.append({"role": "system", "content": self._sistema()})
         return mensagens
 
     # ------------------------------------------------------------ conversa
@@ -58,9 +61,8 @@ class Zeus:
         o rascunho descartado não pode ficar na tela como se fosse resposta."""
         agora = self.relogio()
         respondida = self._vincular_resposta(texto, agora)
-        self.store.registrar_turno(canal, "nicolas", texto, agora)
-
         mensagens = self._historico()
+        self.store.registrar_turno(canal, "nicolas", texto, agora)
         if respondida:
             mensagens.append({
                 "role": "system",

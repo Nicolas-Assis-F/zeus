@@ -66,8 +66,15 @@ class Persona:
             mensagens.pop()
         return mensagens
 
-    def sistema(self, fatos=None, perguntas=None, agenda=None, agora=None) -> str:
-        partes = [self.texto, "", "## Contexto desta conversa", ""]
+    def instrucao(self) -> str:
+        """Prefixo estável; exemplos seguem como mensagens, uma única vez."""
+        return "\n".join(l for l in self.texto.splitlines()
+                         if not FALA.match(l.strip())).strip()
+
+    def sistema(self, fatos=None, perguntas=None, agenda=None, agora=None,
+                capacidades=None, incluir_persona=True) -> str:
+        partes = ([self.instrucao(), ""] if incluir_persona else [])
+        partes += ["## Contexto desta conversa", ""]
         confirmados = [f for f in (fatos or []) if f.get("estado") == "confirmado"]
         hipoteses = [f for f in (fatos or []) if f.get("estado") == "hipotese"]
         if confirmados:
@@ -95,8 +102,10 @@ class Persona:
             "consultar ou esquecer, combinar um horário, ou perguntar o que está "
             "pendente. Para saudação, comentário solto e conversa, responda "
             "conversando: não consulte a memória por causa de um 'opa'.",
-            "Capacidades desta versão: conversa, memória e agenda. Sem câmera, "
-            "sem voz, sem dispositivo, sem ligação, sem busca na internet.",
+            "Capacidades desta versão: conversa, memória e agenda. "
+            + ("Voz local disponível. " if (capacidades or {}).get("voz") else "Sem voz disponível. ")
+            + ("Escuta local disponível. " if (capacidades or {}).get("ouvidos") else "Sem escuta local disponível. ")
+            + "Sem câmera, sem dispositivo, sem ligação, sem busca na internet.",
         ]
         # O que muda a cada turno fica por último de propósito: o começo do
         # prompt continua idêntico e o servidor reaproveita o cache em vez de

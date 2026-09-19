@@ -132,6 +132,15 @@ def _mesmo_modelo(pedido: str, servido: str) -> bool:
     return normaliza(pedido) == normaliza(servido)
 
 
+def _modelo_do_pacote(pedido, pacote, anterior=""):
+    if pacote.get("error"):
+        raise ErroDeModelo("O provedor interrompeu a resposta em fluxo.")
+    servido = pacote.get("model") or anterior
+    if not _mesmo_modelo(pedido, servido):
+        raise ErroDeModelo("O fluxo não confirmou o modelo solicitado.")
+    return servido
+
+
 class ProvedorOllama:
     nome = "ollama"
 
@@ -200,12 +209,9 @@ class ProvedorOllama:
         fluxo = self.transporte_de_fluxo("POST", f"{self.url}/api/chat", corpo, None,
                                          self.timeout)
         partes, chamadas, servido, estatisticas = [], [], "", {}
+        concluido = False
         for pacote in fluxo:
-            if not servido:
-                servido = pacote.get("model", "")
-                if servido and not _mesmo_modelo(self.modelo, servido):
-                    raise ErroDeModelo(
-                        f"Pedi {self.modelo} e o servidor respondeu como {servido}.")
+            servido = _modelo_do_pacote(self.modelo, pacote, servido)
             mensagem = pacote.get("message", {}) or {}
             pedaco = mensagem.get("content", "")
             if pedaco:
@@ -214,11 +220,14 @@ class ProvedorOllama:
                     ao_receber(pedaco)
             chamadas.extend(_normalizar_chamadas(mensagem.get("tool_calls")))
             if pacote.get("done"):
+                concluido = True
                 estatisticas = {chave: pacote.get(chave) for chave in
                                 ("eval_count", "eval_duration", "prompt_eval_count",
                                  "prompt_eval_duration", "load_duration")
                                 if pacote.get(chave) is not None}
-        return Resposta("".join(partes), chamadas, servido or self.modelo, estatisticas)
+        if not concluido:
+            raise ErroDeModelo("O fluxo terminou antes da confirmação de conclusão.")
+        return Resposta("".join(partes), chamadas, servido, estatisticas)
 
     def mensagem_do_assistente(self, resposta: Resposta) -> dict:
         mensagem = {"role": "assistant", "content": resposta.texto}
@@ -289,19 +298,37 @@ class ProvedorOpenRouter:
                  "temperature": temperatura, "stream": True}
         if ferramentas:
             corpo["tools"] = ferramentas
-        partes, servido = [], ""
+        partes, servido, chamadas = [], "", {}
+        concluido = False
         for pacote in self.transporte_de_fluxo("POST", f"{self.url}/chat/completions",
                                                corpo, self._cabecalhos(), self.timeout):
-            servido = servido or pacote.get("model", "")
+            servido = _modelo_do_pacote(self.modelo, pacote, servido)
             for escolha in pacote.get("choices") or []:
-                pedaco = (escolha.get("delta") or {}).get("content") or ""
+                if escolha.get("index", 0) != 0:
+                    continue
+                delta = escolha.get("delta") or {}
+                pedaco = delta.get("content") or ""
                 if pedaco:
                     partes.append(pedaco)
                     if ao_receber:
                         ao_receber(pedaco)
-        if servido and not _mesmo_modelo(self.modelo, servido):
-            raise ErroDeModelo(f"Pedi {self.modelo} e veio {servido}.")
-        return Resposta("".join(partes), [], servido or self.modelo)
+                for fragmento in delta.get("tool_calls") or []:
+                    indice = fragmento.get("index", 0)
+                    chamada = chamadas.setdefault(indice, {
+                        "id": "", "function": {"name": "", "arguments": ""}})
+                    if fragmento.get("id"):
+                        chamada["id"] = fragmento["id"]
+                    for campo in ("name", "arguments"):
+                        chamada["function"][campo] += (fragmento.get("function") or {}).get(campo) or ""
+                motivo = escolha.get("finish_reason")
+                if motivo:
+                    if motivo not in ("stop", "tool_calls"):
+                        raise ErroDeModelo("A resposta foi interrompida pelo provedor.")
+                    concluido = True
+        if not concluido:
+            raise ErroDeModelo("O fluxo terminou antes da confirmação de conclusão.")
+        return Resposta("".join(partes), _normalizar_chamadas(
+            [chamadas[i] for i in sorted(chamadas)]), servido)
 
     def mensagem_do_assistente(self, resposta: Resposta) -> dict:
         mensagem = {"role": "assistant", "content": resposta.texto}
@@ -339,12 +366,27 @@ class ProvedorHibrido:
     def verificar(self) -> str:
         return f"{self.local.verificar()} + {self.remoto.verificar()}"
 
+    def _mensagens_remotas(self, mensagens):
+        convertidas, pendentes = [], []
+        for mensagem in mensagens:
+            nova = dict(mensagem)
+            if mensagem.get("role") == "assistant" and mensagem.get("tool_calls"):
+                chamadas = _normalizar_chamadas(mensagem["tool_calls"])
+                nova = self.remoto.mensagem_do_assistente(
+                    Resposta(mensagem.get("content", ""), chamadas))
+                pendentes = [c["id"] for c in chamadas]
+            elif mensagem.get("role") == "tool" and pendentes:
+                nova = {"role": "tool", "tool_call_id": pendentes.pop(0),
+                        "content": mensagem.get("content", "")}
+            convertidas.append(nova)
+        return convertidas
+
     def conversar(self, mensagens, ferramentas=None, temperatura=0.0) -> Resposta:
         if ferramentas:
             decisao = self.local.conversar(mensagens, ferramentas, 0.0)
             if decisao.chamadas:
                 return decisao
-        return self.remoto.conversar(mensagens, None, temperatura)
+        return self.remoto.conversar(self._mensagens_remotas(mensagens), None, temperatura)
 
     def conversar_em_fluxo(self, mensagens, ferramentas=None, temperatura=0.0,
                            ao_receber=None) -> Resposta:
@@ -352,7 +394,8 @@ class ProvedorHibrido:
             decisao = self.local.conversar(mensagens, ferramentas, 0.0)
             if decisao.chamadas:
                 return decisao
-        return self.remoto.conversar_em_fluxo(mensagens, None, temperatura, ao_receber)
+        return self.remoto.conversar_em_fluxo(
+            self._mensagens_remotas(mensagens), None, temperatura, ao_receber)
 
     def mensagem_do_assistente(self, resposta: Resposta) -> dict:
         alvo = self.local if resposta.chamadas else self.remoto
