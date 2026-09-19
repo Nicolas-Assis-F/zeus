@@ -37,6 +37,7 @@ sobre o arquivo, o que permite testar um modelo sem editar configuração.
 | `temperatura_conversa` | 0.75 por padrão, para a conversa ter vida |
 | `temperatura_decisao` | 0.0, para decisão e roteamento serem estáveis |
 | `turnos_de_conversa` | Quantos turnos recentes entram no contexto |
+| `teto_de_contexto` | Teto de tokens da memória no prompt; 0 desliga — ver docs/CONTEXTO.md |
 
 ## Modelo
 

@@ -8,6 +8,8 @@ lógica, e permite versionar o estilo separadamente do comportamento.
 import re
 from pathlib import Path
 
+from .contexto import linha_do_fato, selecionar
+
 FALA = re.compile(r"^-\s*(nicolas|zeus)\s*:\s*(.+)$", re.IGNORECASE)
 
 PERSONA_MINIMA = (
@@ -72,21 +74,29 @@ class Persona:
                          if not FALA.match(l.strip())).strip()
 
     def sistema(self, fatos=None, perguntas=None, agenda=None, agora=None,
-                capacidades=None, incluir_persona=True) -> str:
+                capacidades=None, incluir_persona=True, mensagem: str = "",
+                teto: int = 0) -> str:
+        return self.montar(fatos, perguntas, agenda, agora, capacidades,
+                           incluir_persona, mensagem, teto)["texto"]
+
+    def montar(self, fatos=None, perguntas=None, agenda=None, agora=None,
+               capacidades=None, incluir_persona=True, mensagem: str = "",
+               teto: int = 0) -> dict:
+        """Monta o contexto e devolve também o que ficou de fora.
+
+        O orçamento é opcional: com `teto` zero o comportamento é o antigo, com
+        a memória inteira no prompt."""
+        escolha = selecionar(fatos, mensagem, teto)
         partes = ([self.instrucao(), ""] if incluir_persona else [])
         partes += ["## Contexto desta conversa", ""]
-        confirmados = [f for f in (fatos or []) if f.get("estado") == "confirmado"]
-        hipoteses = [f for f in (fatos or []) if f.get("estado") == "hipotese"]
-        if confirmados:
+        if escolha["nucleo"]:
             partes.append("Fatos confirmados na memória:")
-            for fato in confirmados:
-                partes.append(f"- {fato['key']}: {fato['value']}")
+            partes.extend(linha_do_fato(fato) for fato in escolha["nucleo"])
         else:
             partes.append("A memória ainda não tem fato confirmado sobre Nicolas.")
-        if hipoteses:
+        if escolha["hipoteses"]:
             partes.append("Hipóteses ainda não confirmadas (trate como suposição):")
-            for fato in hipoteses:
-                partes.append(f"- {fato['key']}: {fato['value']}")
+            partes.extend(linha_do_fato(fato) for fato in escolha["hipoteses"])
         if perguntas:
             partes.append("Perguntas suas ainda em aberto:")
             for pergunta in perguntas:
@@ -109,7 +119,15 @@ class Persona:
         ]
         # O que muda a cada turno fica por último de propósito: o começo do
         # prompt continua idêntico e o servidor reaproveita o cache em vez de
-        # reprocessar a persona inteira a cada mensagem.
+        # reprocessar a persona inteira a cada mensagem. Os fatos trazidos pela
+        # mensagem entram aqui pelo mesmo motivo: eles mudam a cada turno.
+        if escolha["trazidos"]:
+            partes.append("")
+            partes.append("Da memória, por causa do que ele acabou de dizer:")
+            partes.extend(linha_do_fato(fato) for fato in escolha["trazidos"])
+        if escolha["fora"]:
+            partes.append(f"Outros {len(escolha['fora'])} fatos ficaram fora deste "
+                          "contexto por orçamento. Se precisar de um, consulte pela chave.")
         if agora is not None:
             partes.append(f"Momento atual: {agora.astimezone().strftime('%d/%m/%Y %H:%M')}.")
-        return "\n".join(partes)
+        return {"texto": "\n".join(partes), "escolha": escolha}

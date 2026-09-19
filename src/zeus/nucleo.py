@@ -50,16 +50,20 @@ class Zeus:
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
 
     # ------------------------------------------------------------ contexto
-    def _sistema(self):
+    def _sistema(self, mensagem: str = ""):
+        # A mensagem entra aqui para que a memória possa ser escolhida por
+        # relevância: sem ela, a seleção só teria a recência como critério.
         return self.persona.sistema(
             fatos=self.store.fatos(),
             perguntas=self.store.perguntas_abertas(),
             agenda=self.store.agenda_pendente(),
             agora=self.relogio(),
             capacidades=self.capacidades, incluir_persona=False,
+            mensagem=mensagem,
+            teto=getattr(self.config, "teto_de_contexto", 0),
         )
 
-    def _historico(self):
+    def _historico(self, mensagem: str = ""):
         # Ordem pensada para o cache do servidor e para o tom: persona e
         # exemplos primeiro, porque não mudam entre turnos; conversa depois.
         mensagens = [{"role": "system", "content": self.persona.instrucao()}]
@@ -67,7 +71,7 @@ class Zeus:
         for turno in self.store.turnos(self.config.turnos_de_conversa):
             papel = "assistant" if turno["papel"] == "zeus" else "user"
             mensagens.append({"role": papel, "content": turno["texto"]})
-        mensagens.append({"role": "system", "content": self._sistema()})
+        mensagens.append({"role": "system", "content": self._sistema(mensagem)})
         return mensagens
 
     # ------------------------------------------------------------ conversa
@@ -79,7 +83,7 @@ class Zeus:
         o rascunho descartado não pode ficar na tela como se fosse resposta."""
         agora = self.relogio()
         respondida = self._vincular_resposta(texto, agora)
-        mensagens = self._historico()
+        mensagens = self._historico(texto)
         self.store.registrar_turno(canal, "nicolas", texto, agora)
         if respondida:
             mensagens.append({

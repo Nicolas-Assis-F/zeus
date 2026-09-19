@@ -164,7 +164,10 @@ def main():
     escuta = commands.add_parser("medir-escuta", help="Medir um áudio local sem apagá-lo")
     escuta.add_argument("arquivo", type=Path)
     escuta.add_argument("--repeticoes", type=int, default=2)
-    commands.add_parser("persona", help="Mostrar o contexto que o modelo recebe")
+    contexto_cmd = commands.add_parser(
+        "persona", help="Mostrar o contexto que o modelo recebe e o que ficou de fora")
+    contexto_cmd.add_argument("--mensagem", default="",
+                              help="Simula uma mensagem, para ver o que ela traria da memória")
 
     remember = commands.add_parser("remember", help="Registrar um fato explícito")
     remember.add_argument("key")
@@ -254,8 +257,17 @@ def main():
                      detalhe=ouvidos.diagnostico(), **medicao)
             return 3 if falhou else 0
         elif args.command == "persona":
-            print(zeus.persona.sistema(store.fatos(), store.perguntas_abertas(),
-                                       store.agenda_pendente(), datetime.now(timezone.utc)))
+            montado = zeus.persona.montar(
+                store.fatos(), store.perguntas_abertas(), store.agenda_pendente(),
+                datetime.now(timezone.utc), mensagem=args.mensagem,
+                teto=config.teto_de_contexto)
+            print(montado["texto"])
+            escolha = montado["escolha"]
+            print()
+            emit("contexto", teto=escolha["teto"], tokens=escolha["tokens"],
+                 nucleo=len(escolha["nucleo"]), hipoteses=len(escolha["hipoteses"]),
+                 trazidos_pela_mensagem=len(escolha["trazidos"]),
+                 fora=[f["key"] for f in escolha["fora"]])
         elif args.command == "evento":
             episodio = zeus.perceber(args.tipo, args.resumo, simulado=args.simulado)
             emit("episodio_aberto", id=episodio, simulado=args.simulado)

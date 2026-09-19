@@ -93,6 +93,7 @@ forense e não remove cópias de segurança anteriores.
 - [Entregas, recuperação e percepção operacional](docs/ENTREGAS_E_PERCEPCAO.md)
 - [Pesquisa com procedência](docs/PESQUISA.md)
 - [Avaliação por jornadas](docs/AVALIACAO.md)
+- [Orçamento de contexto](docs/CONTEXTO.md)
 - [Entrega 1 — Presença](docs/ENTREGA_1.md)
 - [Desenvolvimento aqui e execução no Zeus](docs/DESENVOLVIMENTO_E_DEPLOY.md)
 - [Persona e próxima entrega](docs/PERSONA_E_PROXIMA_ENTREGA.md)
