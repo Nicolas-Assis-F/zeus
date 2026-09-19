@@ -13,7 +13,10 @@ essas fontes sem ser reconstruído.
 import json
 from datetime import datetime, timezone
 
+from .guarda import limpar_resposta
+
 MAXIMO_DE_RODADAS = 3
+SEM_RESPOSTA = "Essa eu não soube responder direito. Pode dizer de outro jeito?"
 
 
 class Zeus:
@@ -37,7 +40,10 @@ class Zeus:
         )
 
     def _historico(self):
+        # Ordem pensada para o cache do servidor e para o tom: persona e
+        # exemplos primeiro, porque não mudam entre turnos; conversa depois.
         mensagens = [{"role": "system", "content": self._sistema()}]
+        mensagens.extend(self.persona.exemplos())
         for turno in self.store.turnos(self.config.turnos_de_conversa):
             papel = "assistant" if turno["papel"] == "zeus" else "user"
             mensagens.append({"role": papel, "content": turno["texto"]})
@@ -73,9 +79,9 @@ class Zeus:
                 mensagens.append(self.provedor.mensagem_de_ferramenta(
                     chamada, json.dumps(resultado, ensure_ascii=False)))
 
-        final = (resposta.texto if resposta else "").strip()
+        final = limpar_resposta(resposta.texto if resposta else "")
         if not final:
-            final = "Registrei. Alguma coisa mais?"
+            final = SEM_RESPOSTA
         self.store.registrar_turno(canal, "zeus", final, self.relogio())
         return final
 

@@ -14,6 +14,9 @@ class CanalMemoria:
             raise RuntimeError("canal indisponível")
         self.enviados.append(texto)
 
+    def digitando(self):
+        self.avisos_de_digitacao = getattr(self, "avisos_de_digitacao", 0) + 1
+
     def receber(self, espera: int = 0):
         pendentes, self.recebidos = self.recebidos, []
         return pendentes

@@ -120,7 +120,7 @@ class ProvaDePresenca(unittest.TestCase):
             contexto = zeus._sistema()
             self.assertIn("Fatos confirmados", contexto)
             self.assertIn("Hipóteses ainda não confirmadas", contexto)
-            self.assertIn("não vê câmera", contexto)
+            self.assertIn("Sem câmera", contexto)
             store.close()
 
 

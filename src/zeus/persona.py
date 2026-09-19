@@ -5,7 +5,10 @@ entrega. Manter o texto fora do programa permite ajustar tom sem tocar em
 lógica, e permite versionar o estilo separadamente do comportamento.
 """
 
+import re
 from pathlib import Path
+
+FALA = re.compile(r"^-\s*(nicolas|zeus)\s*:\s*(.+)$", re.IGNORECASE)
 
 PERSONA_MINIMA = (
     "Você é Zeus, presença pessoal e persistente na casa de Nicolas. "
@@ -41,6 +44,28 @@ class Persona:
         candidato = raiz / alvo
         return candidato if candidato.exists() else alvo
 
+    def exemplos(self):
+        """Pares de fala do próprio persona.md, entregues como turnos reais.
+
+        Um modelo pequeno aprende tom por exemplo muito melhor do que por
+        adjetivo. Descrever a voz em prosa produz um robô educado; mostrar a
+        voz acontecendo produz a voz."""
+        mensagens = []
+        for linha in self.texto.splitlines():
+            casou = FALA.match(linha.strip())
+            if not casou:
+                continue
+            quem, fala = casou.group(1).lower(), casou.group(2).strip()
+            papel = "assistant" if quem == "zeus" else "user"
+            if mensagens and mensagens[-1]["role"] == papel:
+                continue
+            if not mensagens and papel == "assistant":
+                continue
+            mensagens.append({"role": papel, "content": fala})
+        if mensagens and mensagens[-1]["role"] == "user":
+            mensagens.pop()
+        return mensagens
+
     def sistema(self, fatos=None, perguntas=None, agenda=None, agora=None) -> str:
         partes = [self.texto, "", "## Contexto desta conversa", ""]
         confirmados = [f for f in (fatos or []) if f.get("estado") == "confirmado"]
@@ -65,11 +90,13 @@ class Persona:
                 partes.append(f"- #{item['id']} {item['texto']} em {item['vence_em']}")
         partes += [
             "",
-            "Só existe o que está acima e o que Nicolas disser agora. "
-            "Se algo não estiver aqui, você não sabe.",
-            "Para lembrar, consultar, esquecer, agendar pergunta ou agendar lembrete, "
-            "use as ferramentas disponíveis. Você não tem nenhuma outra capacidade "
-            "nesta versão: não vê câmera, não controla dispositivo, não faz ligação.",
+            "Sobre Nicolas, só existe o que está acima e o que ele disser agora.",
+            "Use ferramenta quando ele informar algo para guardar, pedir para "
+            "consultar ou esquecer, combinar um horário, ou perguntar o que está "
+            "pendente. Para saudação, comentário solto e conversa, responda "
+            "conversando: não consulte a memória por causa de um 'opa'.",
+            "Capacidades desta versão: conversa, memória e agenda. Sem câmera, "
+            "sem voz, sem dispositivo, sem ligação, sem busca na internet.",
         ]
         # O que muda a cada turno fica por último de propósito: o começo do
         # prompt continua idêntico e o servidor reaproveita o cache em vez de

@@ -45,6 +45,18 @@ class CanalTelegram:
         eu = self._chamar("getMe", timeout=20) or {}
         return eu.get("username", "desconhecido")
 
+    def digitando(self):
+        """Mostra "digitando..." enquanto o modelo gera.
+
+        Não acelera nada, mas separa "pensando" de "travado", que a 9,8 tokens
+        por segundo é a diferença entre esperar e desistir. Uma falha aqui é
+        irrelevante e não pode derrubar a resposta."""
+        try:
+            self._chamar("sendChatAction", {"chat_id": self.chat_id, "action": "typing"},
+                         timeout=10)
+        except Exception:
+            pass
+
     def enviar(self, texto: str):
         self._chamar("sendMessage", {"chat_id": self.chat_id, "text": texto}, timeout=30)
 

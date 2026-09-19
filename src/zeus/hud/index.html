@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zeus</title>
+<style>
+  :root{
+    --fundo:#07080c; --painel:#0d1017; --linha:#1b2130;
+    --texto:#e8edf7; --suave:#8994ab;
+    --azul:#4ca8ff; --violeta:#7a5cff; --nucleo:#eaf4ff;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--fundo); color:var(--texto);
+    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:grid; grid-template-columns:minmax(0,1fr) 300px; height:100dvh; overflow:hidden;
+  }
+  @media (max-width:880px){ body{grid-template-columns:1fr} #lateral{display:none} }
+
+  #principal{display:flex; flex-direction:column; min-width:0; padding:0 16px}
+  header{display:flex; align-items:center; gap:14px; padding:18px 4px 10px}
+  #orbe{width:76px; height:76px; flex:0 0 76px; margin:-8px -6px -8px -8px}
+  header h1{font-size:17px; margin:0; letter-spacing:.14em; font-weight:600}
+  header p{margin:2px 0 0; font-size:12px; color:var(--suave)}
+  #situacao{margin-left:auto; font-size:11px; color:var(--suave); text-align:right; letter-spacing:.06em}
+  #situacao b{display:block; color:var(--azul); font-weight:600; text-transform:uppercase}
+
+  #conversa{flex:1; overflow-y:auto; padding:10px 2px 16px; display:flex; flex-direction:column; gap:10px}
+  .fala{max-width:min(680px,88%); padding:10px 14px; border-radius:14px; white-space:pre-wrap; word-wrap:break-word}
+  .zeus{background:var(--painel); border:1px solid var(--linha); border-bottom-left-radius:4px}
+  .nicolas{align-self:flex-end; background:linear-gradient(135deg,#2a3c66,#3a2f6b); border-bottom-right-radius:4px}
+  .sistema{align-self:center; font-size:12px; color:var(--suave); background:none; padding:2px}
+  .hora{display:block; margin-top:4px; font-size:10px; color:var(--suave); opacity:.75}
+
+  #entrada{display:flex; gap:8px; padding:10px 2px 18px; align-items:flex-end}
+  textarea{
+    flex:1; resize:none; min-height:46px; max-height:140px; padding:12px 14px;
+    background:var(--painel); color:var(--texto); border:1px solid var(--linha);
+    border-radius:12px; font:inherit; outline:none;
+  }
+  textarea:focus{border-color:#2d4a7a}
+  button{
+    border:1px solid var(--linha); background:var(--painel); color:var(--texto);
+    border-radius:12px; padding:0 16px; height:46px; cursor:pointer; font:inherit;
+  }
+  button:hover{border-color:#2d4a7a}
+  button[disabled]{opacity:.45; cursor:default}
+  #microfone.ativo{border-color:var(--violeta); color:var(--violeta)}
+
+  #lateral{border-left:1px solid var(--linha); background:#090b11; overflow-y:auto; padding:20px 16px}
+  #lateral section{margin-bottom:22px}
+  #lateral h2{font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--suave); margin:0 0 8px}
+  #lateral ul{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px}
+  #lateral li{font-size:13px; padding:8px 10px; background:var(--painel); border:1px solid var(--linha); border-radius:9px}
+  #lateral li span{display:block; color:var(--suave); font-size:11px; margin-top:2px}
+  .vazio{color:var(--suave); font-size:12px}
+
+  #porta{position:fixed; inset:0; background:var(--fundo); display:none; place-items:center; z-index:9}
+  #porta.aberta{display:grid}
+  #porta form{display:flex; flex-direction:column; gap:10px; width:min(320px,86vw); text-align:center}
+  #porta input{padding:12px; border-radius:10px; border:1px solid var(--linha); background:var(--painel); color:var(--texto); font:inherit}
+</style>
+</head>
+<body>
+<div id="porta"><form onsubmit="guardarChave(event)">
+  <canvas id="orbePorta" width="140" height="140" style="width:70px;height:70px;margin:0 auto"></canvas>
+  <p style="color:var(--suave);font-size:13px;margin:0">Esta interface pede a chave definida em <code>chave_hud</code>.</p>
+  <input id="campoChave" type="password" placeholder="chave de acesso" autocomplete="off">
+  <button type="submit">Entrar</button>
+</form></div>
+
+<main id="principal">
+  <header>
+    <canvas id="orbe" width="152" height="152"></canvas>
+    <div>
+      <h1>ZEUS</h1>
+      <p id="subtitulo">presença local</p>
+    </div>
+    <div id="situacao"><b id="estadoTexto">ocioso</b><span id="detalhe">—</span></div>
+  </header>
+  <div id="conversa"></div>
+  <div id="entrada">
+    <textarea id="texto" rows="1" placeholder="Fale com o Zeus…"></textarea>
+    <button id="microfone" title="Ditar pelo navegador">🎙</button>
+    <button id="enviar">Enviar</button>
+  </div>
+</main>
+
+<aside id="lateral">
+  <section><h2>Perguntas em aberto</h2><ul id="perguntas"></ul></section>
+  <section><h2>Agenda</h2><ul id="agenda"></ul></section>
+  <section><h2>Memória confirmada</h2><ul id="fatos"></ul></section>
+</aside>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+/* ---------------------------------------------------------------- chave */
+function chaveGuardada(){
+  const daUrl = new URLSearchParams(location.search).get("chave");
+  if (daUrl) { try { sessionStorage.setItem("zeus_chave", daUrl); } catch(e){} return daUrl; }
+  try { return sessionStorage.getItem("zeus_chave") || ""; } catch(e){ return ""; }
+}
+let CHAVE = chaveGuardada();
+function guardarChave(evento){
+  evento.preventDefault();
+  CHAVE = $("campoChave").value.trim();
+  try { sessionStorage.setItem("zeus_chave", CHAVE); } catch(e){}
+  $("porta").classList.remove("aberta");
+  iniciar();
+}
+function pedirChave(){ $("porta").classList.add("aberta"); desenharOrbe($("orbePorta"), 140); }
+
+/* ----------------------------------------------------------------- orbe */
+let ESTADO = "ocioso";
+const CORES = {
+  ocioso:   ["#4ca8ff", "#7a5cff", 0.55],
+  ouvindo:  ["#7a5cff", "#4ca8ff", 1.15],
+  pensando: ["#4ca8ff", "#eaf4ff", 1.9],
+  falando:  ["#eaf4ff", "#4ca8ff", 1.35],
+  offline:  ["#3a4257", "#2a3040", 0.25],
+};
+function desenharOrbe(tela, lado){
+  const ctx = tela.getContext("2d");
+  const r = lado/2, t = performance.now()/1000;
+  const [a, b, ritmo] = CORES[ESTADO] || CORES.ocioso;
+  ctx.clearRect(0,0,lado,lado);
+
+  const pulso = 1 + 0.06*Math.sin(t*ritmo*2.2);
+  const halo = ctx.createRadialGradient(r,r,r*0.12, r,r,r*0.95*pulso);
+  halo.addColorStop(0, a); halo.addColorStop(0.45, b); halo.addColorStop(1, "rgba(7,8,12,0)");
+  ctx.globalAlpha = 0.5; ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(r,r,r*0.95*pulso,0,Math.PI*2); ctx.fill();
+
+  ctx.globalAlpha = 0.85;
+  for (let i=0;i<3;i++){
+    const fase = t*ritmo*(0.5+i*0.35) + i*2.1;
+    const raio = r*(0.32+i*0.14);
+    ctx.beginPath();
+    ctx.strokeStyle = i%2 ? b : a;
+    ctx.lineWidth = 1.2;
+    ctx.ellipse(r, r, raio, raio*(0.35+0.28*Math.abs(Math.sin(fase))), fase, 0, Math.PI*2);
+    ctx.stroke();
+  }
+
+  const nucleo = ctx.createRadialGradient(r,r,0, r,r,r*0.3*pulso);
+  nucleo.addColorStop(0, "#ffffff"); nucleo.addColorStop(0.5, a); nucleo.addColorStop(1, "rgba(7,8,12,0)");
+  ctx.globalAlpha = 1; ctx.fillStyle = nucleo;
+  ctx.beginPath(); ctx.arc(r,r,r*0.3*pulso,0,Math.PI*2); ctx.fill();
+}
+function animar(){
+  desenharOrbe($("orbe"), 152);
+  if ($("porta").classList.contains("aberta")) desenharOrbe($("orbePorta"), 140);
+  requestAnimationFrame(animar);
+}
+function mudarEstado(novo, detalhe){
+  ESTADO = novo;
+  $("estadoTexto").textContent = novo;
+  if (detalhe !== undefined) $("detalhe").textContent = detalhe;
+}
+
+/* ------------------------------------------------------------- conversa */
+function agora(){ return new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); }
+function momento(iso){
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const hoje = new Date();
+  const mesmoDia = d.toDateString() === hoje.toDateString();
+  return mesmoDia
+    ? d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})
+    : d.toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+}
+function escrever(quem, texto, hora){
+  const div = document.createElement("div");
+  div.className = "fala " + quem;
+  div.textContent = texto;
+  if (quem !== "sistema"){
+    const marca = document.createElement("span");
+    marca.className = "hora"; marca.textContent = hora || agora();
+    div.appendChild(marca);
+  }
+  $("conversa").appendChild(div);
+  $("conversa").scrollTop = $("conversa").scrollHeight;
+}
+
+async function enviar(){
+  const campo = $("texto");
+  const texto = campo.value.trim();
+  if (!texto) return;
+  campo.value = "";
+  escrever("nicolas", texto);
+  mudarEstado("pensando", "gerando resposta");
+  try{
+    const resposta = await fetch("/mensagem?chave=" + encodeURIComponent(CHAVE), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({texto})
+    });
+    if (resposta.status === 401) { pedirChave(); return; }
+    if (!resposta.ok) throw new Error(resposta.status);
+  }catch(e){
+    mudarEstado("offline", "falha ao enviar");
+    escrever("sistema", "Não consegui entregar sua mensagem ao Zeus.");
+  }
+}
+$("enviar").onclick = enviar;
+$("texto").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); enviar(); }
+});
+
+/* ----------------------------------------------------------------- fala */
+let AUDIO = null;
+function tocar(url){
+  try{
+    if (AUDIO) { AUDIO.pause(); }
+    AUDIO = new Audio(url + (url.includes("?") ? "&" : "?") + "chave=" + encodeURIComponent(CHAVE));
+    mudarEstado("falando", "voz local");
+    AUDIO.onended = () => mudarEstado("ocioso", "—");
+    AUDIO.play().catch(() => mudarEstado("ocioso", "—"));
+  }catch(e){ mudarEstado("ocioso", "—"); }
+}
+
+/* -------------------------------------------------- ditado pelo navegador */
+const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!Reconhecimento){
+  $("microfone").disabled = true;
+  $("microfone").title = "Este navegador não oferece ditado";
+} else {
+  const ouvinte = new Reconhecimento();
+  ouvinte.lang = "pt-BR"; ouvinte.interimResults = false; ouvinte.continuous = false;
+  let ouvindo = false;
+  $("microfone").onclick = () => {
+    if (ouvindo){ ouvinte.stop(); return; }
+    // O ditado usa o serviço do próprio navegador: o áudio sai do computador.
+    // Por isso ele é um botão, nunca o padrão.
+    if (!sessionStorage.getItem("zeus_ditado_ok")){
+      if (!confirm("O ditado usa o reconhecimento de voz do navegador, que envia o áudio para o serviço dele. O texto digitado continua local. Deseja usar mesmo assim?")) return;
+      try { sessionStorage.setItem("zeus_ditado_ok","1"); } catch(e){}
+    }
+    ouvinte.start();
+  };
+  ouvinte.onstart = () => { ouvindo = true; $("microfone").classList.add("ativo"); mudarEstado("ouvindo","ditado do navegador"); };
+  ouvinte.onend = () => { ouvindo = false; $("microfone").classList.remove("ativo"); if (ESTADO === "ouvindo") mudarEstado("ocioso","—"); };
+  ouvinte.onresult = (e) => {
+    const dito = e.results[0][0].transcript;
+    $("texto").value = ($("texto").value + " " + dito).trim();
+    enviar();
+  };
+}
+
+/* ---------------------------------------------------------------- estado */
+function listar(alvo, itens, vazio, formatar){
+  const lista = $(alvo);
+  lista.innerHTML = "";
+  if (!itens || !itens.length){
+    const li = document.createElement("li");
+    li.className = "vazio"; li.style.background = "none"; li.style.border = "none";
+    li.textContent = vazio; lista.appendChild(li); return;
+  }
+  for (const item of itens.slice(0,12)){
+    const li = document.createElement("li");
+    const [titulo, detalhe] = formatar(item);
+    li.textContent = titulo;
+    if (detalhe){ const s = document.createElement("span"); s.textContent = detalhe; li.appendChild(s); }
+    lista.appendChild(li);
+  }
+}
+function pintarEstado(estado){
+  listar("perguntas", estado.perguntas, "nenhuma", (p) => [p.texto, p.situacao]);
+  listar("agenda", estado.lembretes, "nada agendado", (a) => [a.texto, momento(a.vence_em)]);
+  listar("fatos", estado.fatos, "memória vazia", (f) => [f.value, f.key]);
+  $("subtitulo").textContent = estado.modelo
+    ? estado.modelo + (estado.voz ? " · voz local" : " · sem voz")
+    : "presença local";
+}
+async function carregarEstado(){
+  try{
+    const r = await fetch("/estado?chave=" + encodeURIComponent(CHAVE));
+    if (r.status === 401){ pedirChave(); return; }
+    const estado = await r.json();
+    pintarEstado(estado);
+    if (estado.turnos && !$("conversa").childElementCount){
+      for (const t of estado.turnos) escrever(t.papel === "zeus" ? "zeus" : "nicolas", t.texto, momento(t.em));
+    }
+  }catch(e){ mudarEstado("offline","sem contato com o Zeus"); }
+}
+
+let fluxo = null;
+function abrirFluxo(){
+  if (fluxo) fluxo.close();
+  fluxo = new EventSource("/fluxo?chave=" + encodeURIComponent(CHAVE));
+  fluxo.onopen = () => mudarEstado("ocioso","—");
+  fluxo.onerror = () => mudarEstado("offline","reconectando");
+  fluxo.onmessage = (evento) => {
+    let pacote; try{ pacote = JSON.parse(evento.data); }catch(e){ return; }
+    if (pacote.tipo === "estado"){ pintarEstado(pacote); }
+    else if (pacote.tipo === "mensagem"){
+      escrever(pacote.de === "zeus" ? "zeus" : "nicolas", pacote.texto, pacote.hora);
+      if (pacote.audio) tocar(pacote.audio); else mudarEstado("ocioso","—");
+    }
+    else if (pacote.tipo === "situacao"){ mudarEstado(pacote.estado, pacote.detalhe); }
+  };
+}
+
+function iniciar(){ carregarEstado(); abrirFluxo(); }
+animar();
+if (CHAVE) iniciar(); else pedirChave();
+</script>
+</body>
+</html>

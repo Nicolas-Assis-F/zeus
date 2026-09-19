@@ -62,3 +62,21 @@ Três testes automatizados passaram nesta máquina: persistência e correção a
 - O `chat_id` usado era o número do próprio bot, que aparece antes dos dois pontos no token. O identificador da conversa é outro e vem do `getUpdates`. A documentação passou a avisar.
 - Os comandos só funcionavam de dentro de `src/`, porque é lá que o pacote vive. Foi adicionado o atalho `./zeus`, que descobre a raiz do repositório pelo próprio caminho e monta o `PYTHONPATH` sozinho.
 - Trinta testes passando.
+
+## 18 de setembro de 2026 — primeira conversa real pelo Telegram
+
+- O ciclo completo funcionou com modelo e canal reais: conversa, memória de que Nicolas é o criador, lembrete pedido às 18:03 e entregue às 18:23, sem duplicação.
+- Problemas observados por Nicolas: pouca persona, respostas lentas, invenção de dados e falta de autonomia.
+- Corrigidos nesta rodada: ferramenta sendo chamada para saudação, persona descrita em vez de demonstrada, chamada de ferramenta vazando como JSON no Telegram, silêncio sem aviso de digitação, mensagens simultâneas gerando respostas fora de ordem e resposta sem teto de tamanho.
+- Não corrigível por código nesta etapa: invenção de dado do mundo, que depende de pesquisa com procedência, e profundidade de persona, que depende do tamanho do modelo que cabe em 4 GiB.
+- O diagnóstico completo ficou em `docs/QUALIDADE_DA_CONVERSA.md`.
+- Trinta e cinco testes passando.
+
+## 18 de setembro de 2026 — interface e voz
+
+- Nicolas decidiu avançar no software antes do hardware. O caminho de percepção por sensor foi interrompido antes de virar código no repositório.
+- Os recibos do projeto confirmam que o LD2410 ainda não foi comprado. O que existe em bancada é ESP32, HC-SR04, DS18B20, módulo relé, protoboard e jumpers.
+- Entregue a HUD: página servida pelo próprio processo do Zeus, com orbe reativo na identidade visual do escopo, conversa, perguntas em aberto, agenda e memória confirmada. Transporte por SSE, sem dependência externa, chave obrigatória para qualquer rota de dado.
+- Entregue a voz que sai: Piper na CPU, opcional, com diagnóstico honesto quando ausente. A voz que entra continua sendo ditado do navegador, com confirmação explícita, porque escuta local depende de microfone que ainda não existe.
+- Um defeito real apareceu no teste de fumaça antes de qualquer uso: a conexão SQLite não atravessa thread, e o manipulador HTTP quebrava no primeiro acesso à página. O estado passou a ser um retrato em cache alimentado pelo laço principal.
+- Quarenta testes passando. A página foi verificada em navegador de verdade, com captura de tela e console limpo.

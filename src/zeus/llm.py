@@ -57,13 +57,16 @@ class ProvedorOllama:
     nome = "ollama"
 
     def __init__(self, url: str, modelo: str, transporte=None, timeout=TEMPO_LIMITE,
-                 keep_alive: str = "30m"):
+                 keep_alive: str = "30m", limite_de_resposta: int = 320):
         self.url = url.rstrip("/")
         self.modelo = modelo
         self.transporte = transporte or transporte_http
         self.timeout = timeout
         # Recarregar 4,9 GB a cada mensagem custa mais que a resposta inteira.
         self.keep_alive = keep_alive
+        # A 9,8 tokens por segundo, resposta longa é espera longa. O teto corta
+        # a divagação antes de ela virar um minuto de silêncio no Telegram.
+        self.limite_de_resposta = limite_de_resposta
 
     def verificar(self) -> str:
         dados = self.transporte("GET", f"{self.url}/api/tags", None, None, self.timeout)
@@ -82,7 +85,8 @@ class ProvedorOllama:
             "messages": mensagens,
             "stream": False,
             "keep_alive": self.keep_alive,
-            "options": {"temperature": temperatura},
+            "options": {"temperature": temperatura,
+                        "num_predict": self.limite_de_resposta},
         }
         if ferramentas:
             corpo["tools"] = ferramentas
@@ -189,7 +193,8 @@ class ProvedorOpenRouter:
 def criar_provedor(config, transporte=None):
     if config.provedor == "ollama":
         return ProvedorOllama(config.ollama_url, config.modelo, transporte,
-                              keep_alive=config.keep_alive)
+                              keep_alive=config.keep_alive,
+                              limite_de_resposta=config.limite_de_resposta)
     if config.provedor == "openrouter":
         return ProvedorOpenRouter(config.openrouter_url, config.modelo,
                                   config.openrouter_chave, transporte)

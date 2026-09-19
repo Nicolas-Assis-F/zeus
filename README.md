@@ -43,6 +43,10 @@ Com modelo e canal configurados (veja `docs/CONFIGURACAO.md`):
 ./zeus agenda
 ```
 
+Com `chave_hud` definida, `./zeus run` também sobe a interface no navegador e
+imprime o endereço no evento `started`. Telegram e interface compartilham a
+mesma memória e os mesmos episódios.
+
 `check` diz em `origem` qual arquivo de configuração foi lido de verdade. Se
 aparecer "não existe", o Zeus está rodando com os padrões e qualquer edição
 feita em outro arquivo não tem efeito.
@@ -67,11 +71,14 @@ forense e não remove cópias de segurança anteriores.
 | `guarda.py` | Barreiras que não dependem do modelo se comportar |
 | `tempo.py` | Interpretação de momentos declarados em português |
 | `canais/` | Telegram e canal em memória para teste |
+| `hud/` | Interface no navegador, servida pelo próprio processo |
+| `voz.py` | Síntese local com Piper, opcional |
 
 ## Documentação
 
 - [Instalação da máquina e acesso remoto](docs/INSTALACAO.md)
 - [Configuração de modelo e canal](docs/CONFIGURACAO.md)
+- [Interface e voz](docs/INTERFACE_E_VOZ.md)
 - [Entrega 1 — Presença](docs/ENTREGA_1.md)
 - [Desenvolvimento aqui e execução no Zeus](docs/DESENVOLVIMENTO_E_DEPLOY.md)
 - [Persona e próxima entrega](docs/PERSONA_E_PROXIMA_ENTREGA.md)

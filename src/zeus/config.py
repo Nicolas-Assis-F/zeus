@@ -25,7 +25,13 @@ class Config:
     telegram_token: str = ""
     telegram_chat_id: str = ""
     keep_alive: str = "30m"
+    limite_de_resposta: int = 320
     persona: str = "config/persona.md"
+    hud_host: str = "0.0.0.0"
+    hud_porta: int = 8770
+    chave_hud: str = "32009"
+    voz_binario: str = "piper"
+    voz_modelo: str = ""
     temperatura_conversa: float = 0.75
     temperatura_decisao: float = 0.0
     turnos_de_conversa: int = 12
@@ -44,7 +50,8 @@ class Config:
         dados = {}
         for campo in fields(self):
             valor = getattr(self, campo.name)
-            if campo.name in ("openrouter_chave", "telegram_token", "telegram_chat_id"):
+            if campo.name in ("openrouter_chave", "telegram_token", "telegram_chat_id",
+                              "chave_hud"):
                 dados[campo.name] = "definido" if valor else "ausente"
             else:
                 dados[campo.name] = valor

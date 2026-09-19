@@ -6,6 +6,7 @@ memória narrativa não guarda número financeiro. Consulta a domínio financeir
 quando existir, lê o registro de origem em vez de repetir um resumo do modelo.
 """
 
+import json
 import re
 
 PADROES_FINANCEIROS = [
@@ -32,3 +33,43 @@ def checar_memoria(chave: str, valor: str):
             "Recusado: valor financeiro não entra na memória narrativa. "
             "Esse dado pertence ao domínio financeiro, com registro de origem."
         )
+
+
+# --------------------------------------------------------------------------
+# Chamada de ferramenta que vaza como texto.
+#
+# Um modelo pequeno às vezes "imagina" uma ferramenta e escreve o JSON dela na
+# resposta em vez de chamar de verdade. Para Nicolas isso aparece como um bloco
+# de código no meio do Telegram. O texto é limpo antes de sair, e uma resposta
+# que era só isso vira uma frase honesta.
+
+CHAVES_DE_CHAMADA = ("name", "parameters", "arguments", "function", "tool",
+                     "ferramenta", "nome")
+
+
+def limpar_resposta(texto: str) -> str:
+    """Remove objetos JSON que aparentam ser chamada de ferramenta."""
+    if not texto or "{" not in texto:
+        return (texto or "").strip()
+    decodificador = json.JSONDecoder()
+    limpo, posicao = [], 0
+    while posicao < len(texto):
+        if texto[posicao] != "{":
+            limpo.append(texto[posicao])
+            posicao += 1
+            continue
+        try:
+            objeto, fim = decodificador.raw_decode(texto, posicao)
+        except ValueError:
+            limpo.append(texto[posicao])
+            posicao += 1
+            continue
+        if isinstance(objeto, dict) and any(c in objeto for c in CHAVES_DE_CHAMADA):
+            posicao = fim
+            continue
+        limpo.append(texto[posicao:fim])
+        posicao = fim
+    resultado = "".join(limpo)
+    resultado = re.sub(r"```(?:json)?\s*```", "", resultado)
+    resultado = re.sub(r"\n{3,}", "\n\n", resultado)
+    return resultado.strip()
