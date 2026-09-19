@@ -20,7 +20,9 @@ from threading import Event, Thread
 from . import __version__
 from .config import carregar as carregar_config
 from .ferramentas import Ferramentas
-from .execucao import CaixaDeEntrada, FalaEmSegundoPlano, RecepcaoTelegram
+from .execucao import (CaixaDeEntrada, FalaEmSegundoPlano, RecepcaoTelegram,
+                       InstanciaUnica, EstadoOperacao, SupervisorPresenca)
+from .entregas import Entregas
 from .llm import ErroDeModelo, criar_provedor
 from .nucleo import Zeus
 from .persona import Persona
@@ -106,6 +108,8 @@ def retrato(store, config, voz, modelo="", ouvidos=None):
         "perguntas": store.perguntas_abertas(),
         "lembretes": store.agenda_pendente(),
         "turnos": store.turnos(20),
+        "entregas": Entregas(store).listar(20),
+        "entradas": Entregas(store).entradas(),
         "modelo": modelo or config.modelo,
         "voz": voz.disponivel() if voz else False,
         "ouvidos": ouvidos.disponivel() if ouvidos else False,
@@ -134,6 +138,15 @@ def main():
 
     commands.add_parser("run", help="Manter o Zeus em execução")
     commands.add_parser("agenda", help="Listar perguntas e lembretes pendentes")
+    commands.add_parser("entregas", help="Mostrar estados de saída e entradas incertas")
+    backup = commands.add_parser("backup", help="Criar cópia consistente sem sobrescrever")
+    backup.add_argument("destino", type=Path)
+    resolver = commands.add_parser("resolver-entrega", help="Resolver saída incerta conscientemente")
+    resolver.add_argument("chave")
+    resolver.add_argument("acao", choices=['confirmar', 'reenviar', 'descartar'])
+    entrada = commands.add_parser("resolver-entrada", help="Reprocessar pode repetir ações; use após conferir")
+    entrada.add_argument("id", type=int)
+    entrada.add_argument("acao", choices=['reprocessar', 'descartar'])
 
     avaliacao_cmd = commands.add_parser(
         "avaliar", help="Rodar as jornadas de avaliação e dizer a origem da evidência")
@@ -209,6 +222,17 @@ def main():
             return 0 if fact is not None else 1
         elif args.command == "forget":
             emit("forgotten", key=args.key, removed=store.forget(args.key))
+        elif args.command == "entregas":
+            fila = Entregas(store)
+            emit('entregas', saidas=fila.listar(), entradas=fila.entradas())
+        elif args.command == "backup":
+            emit('backup', arquivo=str(store.backup(args.destino)))
+        elif args.command == "resolver-entrega":
+            Entregas(store).resolver(args.chave, args.acao)
+            emit('entrega_resolvida', chave=args.chave, acao=args.acao)
+        elif args.command == "resolver-entrada":
+            Entregas(store).resolver_entrada(args.id, args.acao)
+            emit('entrada_resolvida', id=args.id, acao=args.acao)
         elif args.command == "agenda":
             emit("agenda", perguntas=store.perguntas_abertas(),
                  lembretes=store.agenda_pendente())
@@ -350,10 +374,17 @@ def medir(config, zeus, args):
 
 
 def executar(zeus, store, config):
+    with InstanciaUnica(Path(store.path).parent):
+        return _executar(zeus, store, config)
+
+
+def _executar(zeus, store, config):
     stopped = Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stopped.set())
 
+    operacao = EstadoOperacao()
+    fila_de_saida = Entregas(store)
     modelo_ok = False
     try:
         servido = ligar_modelo(zeus, config)
@@ -361,6 +392,8 @@ def executar(zeus, store, config):
     except ErroDeModelo as erro:
         servido = f"indisponível: {erro}"
 
+    operacao.atualizar('modelo', estado='pronta' if modelo_ok else 'indisponivel')
+    proxima_recuperacao = time.monotonic() + max(5, config.intervalo_recuperacao_modelo)
     voz = montar_voz(config)
     estado_local = Path(store.path).parent
     ouvidos = montar_ouvidos(config, estado_local)
@@ -417,6 +450,16 @@ def executar(zeus, store, config):
         return zeus.conversar(texto, canal=canal, ao_receber=empurrar)
 
     fala = FalaEmSegundoPlano(voz, hud.publicar) if hud is not None else None
+    supervisor = SupervisorPresenca(estado_local, config, stopped, hud, operacao)
+    supervisor.iniciar()
+    if not supervisor.pronto.wait(5) or operacao.retrato().get('agenda', {}).get('estado') == 'indisponivel':
+        stopped.set()
+        supervisor.parar()
+        if fala:
+            fala.parar()
+        if hud:
+            hud.parar()
+        raise ValueError('Não foi possível iniciar a agenda persistente.')
     recepcao = None
     if zeus.canal is not None:
         def criar_receptor():
@@ -428,6 +471,14 @@ def executar(zeus, store, config):
     ultimo_batimento = 0.0
     while not stopped.is_set():
         try:
+            if not modelo_ok and time.monotonic() >= proxima_recuperacao:
+                try:
+                    servido = ligar_modelo(zeus, config)
+                    modelo_ok = True
+                    operacao.atualizar('modelo', estado='pronta')
+                except ErroDeModelo:
+                    operacao.atualizar('modelo', estado='indisponivel')
+                proxima_recuperacao = time.monotonic() + max(5, config.intervalo_recuperacao_modelo)
             for _ in range(4):
                 try:
                     pedido = recebidas_da_hud.get_nowait()
@@ -441,15 +492,20 @@ def executar(zeus, store, config):
                                     if zeus.ferramentas.pesquisa else False}
                 if pedido.get("tipo") == "telegram":
                     recebidas = pedido["mensagens"]
+                    chave_resposta = fila_de_saida.iniciar_resposta(recebidas)
                     try:
+                        if chave_resposta is None:
+                            continue
                         texto = "\n".join(m["texto"] for m in recebidas)
                         anunciar("nicolas", texto)
                         resposta = com_aviso_de_digitacao(
                             zeus.canal, lambda: responder(texto, "telegram"))
-                        zeus.canal.enviar(resposta)
-                        for mensagem in recebidas:
-                            zeus.canal.confirmar(mensagem["id"])
+                        fila_de_saida.concluir_resposta(chave_resposta, resposta)
                         anunciar("zeus", resposta)
+                    except Exception:
+                        if chave_resposta:
+                            fila_de_saida.resposta_incerta(chave_resposta)
+                        raise
                     finally:
                         pedido["terminado"].set()
                     continue
@@ -477,10 +533,11 @@ def executar(zeus, store, config):
                 if fala and voz.disponivel():
                     fala.falar(resposta, geracao)
 
-            for aviso in zeus.tick():
-                emit("aviso_enviado", **aviso)
-                anunciar("zeus", aviso["texto"])
         except Exception as erro:  # o ciclo não morre por falha de rede
+            if isinstance(erro, ErroDeModelo):
+                modelo_ok = False
+                proxima_recuperacao = time.monotonic() + max(5, config.intervalo_recuperacao_modelo)
+                operacao.atualizar('modelo', estado='degradada')
             emit("falha_no_ciclo", detalhe=str(erro)[:200])
             if hud is not None:
                 hud.publicar("fluxo", reiniciar=True)
@@ -494,6 +551,7 @@ def executar(zeus, store, config):
             emit("heartbeat", storage="ok")
             ultimo_batimento = agora
 
+    supervisor.parar()
     if fala is not None:
         fala.parar()
     if hud is not None:

@@ -106,6 +106,8 @@ class ProvaDePresenca(unittest.TestCase):
             self.assertEqual(len(store.agenda_pendente()), 1)
 
             canal.falhar = False
+            self.assertEqual(zeus.tick(), [])  # respeita o backoff
+            relogio.avancar(seconds=31)
             enviados = zeus.tick()
             self.assertEqual(len(enviados), 1)
             self.assertEqual(canal.enviados, ["tomar água"])

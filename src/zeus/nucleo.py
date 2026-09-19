@@ -14,6 +14,7 @@ import json
 from datetime import datetime, timezone
 
 from .guarda import limpar_resposta
+from .entregas import Entregas
 
 MAXIMO_DE_RODADAS = 3
 
@@ -148,40 +149,14 @@ class Zeus:
 
     # -------------------------------------------------------------- ciclo
     def tick(self, agora=None):
-        """Revisão deliberada: o que venceu merece contato agora?"""
+        """Entrega durável; em produção roda numa conexão de agenda própria."""
         agora = agora or self.relogio()
         if self.canal is None:
             return []
-        enviados = []
-        for pergunta in self.store.perguntas_vencidas(agora):
-            chave = f"pergunta:{pergunta['id']}"
-            if not self.store.marcar_envio(chave, agora):
-                continue
-            if self._entregar(chave, pergunta["texto"]):
-                self.store.marcar_perguntada(pergunta["id"], agora)
-                self.store.registrar_turno("saida", "zeus", pergunta["texto"], agora)
-                enviados.append({"tipo": "pergunta", "id": pergunta["id"],
-                                 "texto": pergunta["texto"]})
-        for item in self.store.agenda_vencida(agora):
-            chave = f"lembrete:{item['id']}"
-            if not self.store.marcar_envio(chave, agora):
-                continue
-            if self._entregar(chave, item["texto"]):
-                self.store.concluir_agenda(item["id"], agora)
-                self.store.registrar_turno("saida", "zeus", item["texto"], agora)
-                enviados.append({"tipo": "lembrete", "id": item["id"],
-                                 "texto": item["texto"]})
-        return enviados
-
-    def _entregar(self, chave: str, texto: str) -> bool:
-        try:
-            self.canal.enviar(texto)
-            return True
-        except Exception:
-            # A marca é desfeita para que a pendência continue valendo na
-            # próxima revisão. Falha de entrega não pode virar assunto perdido.
-            self.store.desmarcar_envio(chave)
-            return False
+        fila = Entregas(self.store)
+        fila.registrar_agenda(self.canal.nome, agora,
+                             getattr(self.config, 'atraso_maximo_lembrete', 86400))
+        return fila.enviar_pendentes({self.canal.nome: self.canal}, agora)
 
     # ------------------------------------------------------------ percepção
     def perceber(self, tipo: str, resumo: str, dados: dict = None,

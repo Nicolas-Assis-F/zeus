@@ -1,19 +1,24 @@
 """Canal Telegram por long polling, apenas com a biblioteca padrão.
 
-Duas garantias importam aqui. A primeira é o offset persistido: depois de um
-reinício, o Zeus não reprocessa mensagem antiga e não responde duas vezes. A
-segunda é o filtro de conversa: só a conversa configurada é aceita, então uma
-mensagem de terceiro não vira entrada do sistema.
+Mensagens válidas ficam no disco antes de avançar o offset. Saídas têm estados
+próprios: um envio sem confirmação fica incerto e exige decisão explícita.
+Só a conversa configurada é aceita como entrada do sistema.
 
 O token nunca aparece em log. Ele vive na configuração, fora do Git.
 """
 
 from ..llm import transporte_http
+from ..entregas import NaoEnviado
+from ..store import agora_utc, texto_de
 
 CHAVE_OFFSET = "telegram_offset"
 
 
 class ErroDeCanal(RuntimeError):
+    pass
+
+
+class RecusaDoCanal(ErroDeCanal, NaoEnviado):
     pass
 
 
@@ -43,7 +48,7 @@ class CanalTelegram:
             # token. A fronteira do canal remove esse detalhe antes dos logs.
             raise ErroDeCanal(f"Falha de comunicação com Telegram em {metodo}.") from None
         if not dados.get("ok", False):
-            raise ErroDeCanal(f"Telegram recusou {metodo}: {dados.get('description', 'sem motivo')}")
+            raise RecusaDoCanal(f"Telegram recusou {metodo}: {dados.get('description', 'sem motivo')}")
         return dados.get("result")
 
     def verificar(self) -> str:
@@ -63,7 +68,8 @@ class CanalTelegram:
             pass
 
     def enviar(self, texto: str):
-        self._chamar("sendMessage", {"chat_id": self.chat_id, "text": texto}, timeout=30)
+        resposta = self._chamar("sendMessage", {"chat_id": self.chat_id, "text": texto}, timeout=30)
+        return {"message_id": resposta.get("message_id")} if isinstance(resposta, dict) else None
 
     def _offset(self):
         if self.store is None:
@@ -71,28 +77,53 @@ class CanalTelegram:
         bruto = self.store.kv_get(CHAVE_OFFSET)
         return int(bruto) if bruto else None
 
+    def _pendentes(self):
+        if self.store is None:
+            return []
+        return [dict(r) for r in self.store.connection.execute(
+            "SELECT id,texto FROM entradas WHERE situacao='pendente' ORDER BY id LIMIT 32")]
+
     def receber(self, espera: int = None):
+        # O offset confirma posse durável, não resposta humana ou entrega de saída.
+        pendentes = self._pendentes()
+        if pendentes:
+            return pendentes
         corpo = {"timeout": self.espera if espera is None else espera,
                  "allowed_updates": ["message"]}
         offset = self._offset()
         if offset is not None:
             corpo["offset"] = offset
-        mensagens = []
+        mensagens, maior = [], offset or 0
         for atualizacao in self._chamar("getUpdates", corpo) or []:
+            identificador = atualizacao.get("update_id")
+            if not isinstance(identificador, int):
+                continue
+            if offset is not None and identificador < offset:
+                continue
+            maior = max(maior, identificador + 1)
             mensagem = atualizacao.get("message") or {}
             chat = str((mensagem.get("chat") or {}).get("id", ""))
             texto = mensagem.get("text", "")
-            if chat != self.chat_id or not texto:
-                # Conversa não autorizada ou conteúdo sem texto: descartada,
-                # mas o offset avança para não travar a fila.
-                self.confirmar(atualizacao.get("update_id"))
-                continue
-            mensagens.append({"id": atualizacao.get("update_id"), "texto": texto})
-        return mensagens
+            if chat == self.chat_id and isinstance(texto, str) and texto.strip():
+                mensagens.append({"id": identificador, "texto": texto})
+        if self.store is None:
+            return mensagens
+        db = self.store.connection
+        with db:
+            for m in mensagens:
+                db.execute("INSERT OR IGNORE INTO entradas (id,texto,recebida_em) VALUES (?,?,?)",
+                           (m['id'], m['texto'], texto_de(agora_utc())))
+            # Só avançar depois que todas as mensagens válidas estão no disco.
+            if maior:
+                db.execute("INSERT INTO kv (chave,valor) VALUES (?,?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor",
+                           (CHAVE_OFFSET, str(maior)))
+        return self._pendentes()
 
     def confirmar(self, identificador):
         if self.store is None or identificador is None:
             return
+        with self.store.connection:
+            self.store.connection.execute("UPDATE entradas SET situacao='respondida' WHERE id=? AND situacao='pendente'", (identificador,))
         atual = self._offset() or 0
         if identificador + 1 > atual:
             self.store.kv_set(CHAVE_OFFSET, identificador + 1)

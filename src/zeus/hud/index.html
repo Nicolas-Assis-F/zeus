@@ -93,6 +93,8 @@
 <aside id="lateral">
   <section><h2>Perguntas em aberto</h2><ul id="perguntas"></ul></section>
   <section><h2>Agenda</h2><ul id="agenda"></ul></section>
+  <section><h2>Entregas que precisam de atenção</h2><ul id="entregas"></ul></section>
+  <section><h2>Operação</h2><ul id="operacao"></ul></section>
   <section><h2>Memória confirmada</h2><ul id="fatos"></ul></section>
 </aside>
 
@@ -365,7 +367,17 @@ function listar(alvo, itens, vazio, formatar){
     lista.appendChild(li);
   }
 }
+function pintarOperacao(estado){
+  const atencao = (estado.entregas || []).filter(e => ["incerta","falhou","expirada"].includes(e.situacao));
+  const entradas = (estado.entradas || []).filter(e => e.situacao === "incerta");
+  const itens = atencao.map(e => ({texto:e.texto, detalhe:e.situacao + " · " + e.motivo}));
+  entradas.forEach(() => itens.push({texto:"Mensagem do Telegram precisa de revisão", detalhe:"processamento interrompido"}));
+  listar("entregas", itens, "nenhuma pendência de entrega", e => [e.texto, e.detalhe]);
+  const capacidades = estado.capacidades || estado.operacao || {};
+  listar("operacao", Object.entries(capacidades), "aguardando diagnóstico", e => [e[0].replaceAll("_"," "), e[1].estado]);
+}
 function pintarEstado(estado){
+  pintarOperacao(estado);
   listar("perguntas", estado.perguntas, "nenhuma", (p) => [p.texto, p.situacao]);
   listar("agenda", estado.lembretes, "nada agendado", (a) => [a.texto, momento(a.vence_em)]);
   listar("fatos", estado.fatos, "memória vazia", (f) => [f.value, f.key]);
@@ -396,6 +408,15 @@ function abrirFluxo(){
   fluxo.onmessage = (evento) => {
     let pacote; try{ pacote = JSON.parse(evento.data); }catch(e){ return; }
     if (pacote.tipo === "estado"){ pintarEstado(pacote); }
+    else if (pacote.tipo === "operacao"){
+      pintarOperacao(pacote);
+      listar("perguntas", pacote.perguntas, "nenhuma", p => [p.texto, p.situacao]);
+      listar("agenda", pacote.lembretes, "nada agendado", a => [a.texto, momento(a.vence_em)]);
+    }
+    else if (pacote.tipo === "aviso"){
+      // Aviso não encerra nem descarta a bolha da conversa em andamento.
+      if (pacote.tipo_saida !== "resposta") escrever("zeus", pacote.texto);
+    }
     else if (pacote.tipo === "fluxo"){
       if (pacote.reiniciar) descartarFluxo(); else fluir(pacote.pedaco || "");
       if (ESTADO !== "pensando") mudarEstado("pensando","escrevendo");

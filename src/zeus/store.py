@@ -11,6 +11,7 @@ escrita feita pelo modelo.
 
 import json
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -65,6 +66,25 @@ MIGRACOES = [
     CREATE TABLE IF NOT EXISTS kv (
         chave TEXT PRIMARY KEY, valor TEXT NOT NULL);
     """,
+    # 3 — entrada durável, saída com estados e percepção deduplicada.
+    """
+    CREATE TABLE saidas (
+        chave TEXT PRIMARY KEY, canal TEXT NOT NULL, tipo TEXT NOT NULL,
+        referencia INTEGER, texto TEXT NOT NULL, situacao TEXT NOT NULL DEFAULT 'pendente',
+        tentativas INTEGER NOT NULL DEFAULT 0, criada_em TEXT NOT NULL,
+        atualizada_em TEXT NOT NULL, tentar_em TEXT NOT NULL, expira_em TEXT,
+        motivo TEXT NOT NULL DEFAULT '', recibo TEXT);
+    CREATE INDEX saidas_pendentes ON saidas(situacao, tentar_em);
+    CREATE TABLE entradas (
+        id INTEGER PRIMARY KEY, texto TEXT NOT NULL, situacao TEXT NOT NULL DEFAULT 'pendente',
+        recebida_em TEXT NOT NULL, resposta TEXT);
+    CREATE TABLE percepcoes (
+        id TEXT PRIMARY KEY, origem TEXT NOT NULL, observado_em TEXT NOT NULL,
+        recebido_em TEXT NOT NULL, valido_ate TEXT NOT NULL, confianca REAL NOT NULL,
+        simulado INTEGER NOT NULL, tipo TEXT NOT NULL, resumo TEXT NOT NULL,
+        dados TEXT NOT NULL, episodio INTEGER REFERENCES episodios(id));
+    """,
+
 ]
 
 
@@ -86,6 +106,13 @@ class Store:
         self.path.chmod(0o600)
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA foreign_keys=ON")
+        # Backup do esquema anterior antes de qualquer alteração de dados.
+        versao = self.connection.execute(
+            "SELECT name FROM sqlite_master WHERE name='schema_version'").fetchone()
+        if versao:
+            anterior = self.connection.execute("SELECT versao FROM schema_version").fetchone()
+            if anterior and 0 < anterior[0] < len(MIGRACOES):
+                self.backup(directory / "backups" / f"antes-v{len(MIGRACOES)}-{uuid.uuid4().hex}.sqlite3")
         self._migrar()
 
     def _migrar(self):
@@ -96,12 +123,38 @@ class Store:
         atual = linha["versao"] if linha else 0
         if not linha:
             self.connection.execute("INSERT INTO schema_version VALUES (0)")
+        self.connection.commit()
         for indice, script in enumerate(MIGRACOES, start=1):
             if indice <= atual:
                 continue
-            self.connection.executescript(script)
-            self.connection.execute("UPDATE schema_version SET versao=?", (indice,))
+            try:
+                self.connection.executescript(
+                    "BEGIN IMMEDIATE;\n" + script +
+                    f"\nUPDATE schema_version SET versao={indice};\nCOMMIT;")
+            except Exception:
+                self.connection.rollback()
+                raise
         self.connection.commit()
+
+    def backup(self, destino: Path):
+        """Cópia consistente, inclusive com WAL ativo; nunca sobrescreve arquivo."""
+        import os
+        destino = Path(destino).expanduser()
+        destino.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(destino, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        try:
+            copia = sqlite3.connect(destino)
+            try:
+                self.connection.backup(copia)
+                if copia.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise RuntimeError("A cópia do banco não passou na verificação.")
+            finally:
+                copia.close()
+        except Exception:
+            destino.unlink(missing_ok=True)
+            raise
+        return destino
 
     def close(self):
         self.connection.close()

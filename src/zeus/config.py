@@ -50,6 +50,10 @@ class Config:
     temperatura_decisao: float = 0.0
     turnos_de_conversa: int = 12
     intervalo_agenda: int = 30
+    atraso_maximo_lembrete: int = 86400
+    monitorar_modelo: bool = False
+    intervalo_monitor: int = 30
+    intervalo_recuperacao_modelo: int = 30
     espera_telegram: int = 25
     # Preenchido por carregar(): dizer de onde a configuração veio evita a
     # confusão de editar um arquivo que o programa nunca lê.

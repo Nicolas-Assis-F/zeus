@@ -13,8 +13,13 @@ A validação atual e as limitações estão em [Estado do projeto](docs/ESTADO_
 A evolução conjunta segue o [plano mestre](docs/PLANO_MESTRE_EVOLUCAO.md) e o
 [protocolo Codex e Claude](docs/TRABALHO_CONJUNTO.md).
 
-Ainda não existe visão, telefonia, controle de ambiente, pesquisa externa nem
-memória semântica. Há iniciativa baseada nos combinados e prazos registrados.
+A pesquisa externa é opcional e fornece snippets com fontes. Ainda não existe
+visão, telefonia, controle de ambiente nem memória semântica. Há iniciativa
+baseada nos combinados e prazos registrados.
+
+A próxima entrega adiciona [fila durável e percepção operacional](docs/ENTREGAS_E_PERCEPCAO.md):
+a agenda continua enquanto o modelo responde, falhas ambíguas ficam visíveis,
+e o monitor opcional observa a disponibilidade do modelo local.
 
 O desenvolvimento acontece no computador de Nicolas. O X99 é o destino de
 execução e recebe atualização por `git pull`.
@@ -85,6 +90,7 @@ forense e não remove cópias de segurança anteriores.
 - [Instalação da máquina e acesso remoto](docs/INSTALACAO.md)
 - [Configuração de modelo e canal](docs/CONFIGURACAO.md)
 - [Interface e voz](docs/INTERFACE_E_VOZ.md)
+- [Entregas, recuperação e percepção operacional](docs/ENTREGAS_E_PERCEPCAO.md)
 - [Pesquisa com procedência](docs/PESQUISA.md)
 - [Avaliação por jornadas](docs/AVALIACAO.md)
 - [Entrega 1 — Presença](docs/ENTREGA_1.md)
