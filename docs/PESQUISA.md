@@ -8,8 +8,9 @@ mordida. Não foi defeito de código: um modelo de oito bilhões de parâmetros
 preenche lacuna com o que soa plausível, e nenhum ajuste de prompt conserta
 isso. Faltava fonte.
 
-Agora ele pesquisa antes de afirmar, e o que não veio de lugar nenhum não vira
-resposta.
+Com a pesquisa habilitada, o Zeus pode consultar o buscador e recebe instruções
+para citar fontes e admitir falta de evidência. Isso reduz a lacuna de informação;
+ainda não garante que toda afirmação gerada pelo modelo esteja correta.
 
 ## Ligar
 
@@ -28,13 +29,21 @@ Com um SearXNG próprio, que devolve JSON e não depende de leitura de HTML:
 ```
 
 `./zeus check` mostra o estado da pesquisa junto do modelo, da voz e dos
-ouvidos.
+ouvidos. Configurada significa que o provedor e seu endereço são válidos; não
+prova conectividade. SearXNG sem URL, com endereço inválido ou provedor desconhecido
+recusa antes da rede. Não há troca silenciosa para outro buscador.
 
 ## O contrato
 
 Cada fonte carrega título, endereço, domínio, trecho, data de publicação quando
-a página informa, e a data da consulta. O resultado traz a consulta original, o
+o buscador entrega metadado explícito e válido, e a data da consulta. O resultado traz a consulta original, o
 provedor usado e, quando não há nada, `sem_resultado`.
+
+O parser DuckDuckGo não declara data de publicação: uma data citada no snippet
+pode ser a data de um evento histórico. No SearXNG, `publishedDate` só entra
+quando é uma data ISO válida. Esse metadado é informado pelo buscador, não
+verificado independentemente na página. `consultado_em` registra a consulta e
+nunca é usado como substituto de `publicado_em`.
 
 As fontes chegam ao modelo separadas, nunca fundidas. Quando duas discordam, a
 persona manda dizer que discordam em vez de escolher uma calada.
@@ -69,5 +78,6 @@ basta.
 Não há cobrança nem chave paga em lugar nenhum. Qualquer provedor que custe
 dinheiro exigirá configuração explícita, como este exige.
 
-O cache guarda cada consulta por trinta minutos, em memória e em disco sob o
-diretório de estado. Pergunta repetida não volta à rede.
+O cache evita repetir a consulta por trinta minutos enquanto o processo está
+ativo. Uma cópia do resultado é gravada no diretório de estado, mas ainda não
+é recarregada no reinício. Resultados antigos em disco não voltam ao contexto.
