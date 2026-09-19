@@ -28,5 +28,6 @@
   "temperatura_conversa": 0.75,
   "temperatura_decisao": 0.0,
   "turnos_de_conversa": 12,
+  "teto_de_contexto": 600,
   "intervalo_agenda": 30
 }
