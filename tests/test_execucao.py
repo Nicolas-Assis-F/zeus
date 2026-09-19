@@ -58,6 +58,35 @@ class ExecucaoConcorrente(unittest.TestCase):
         self.assertNotEqual(criadores[0], threading.get_ident())
         store.close.assert_called_once()
 
+    def test_receptor_tem_store_proprio_e_le_offset_confirmado_pelo_nucleo(self):
+        from zeus.store import Store
+        from zeus.canais.telegram import CanalTelegram
+        with tempfile.TemporaryDirectory() as temp:
+            dono = Store(Path(temp))
+            self.addCleanup(dono.close)
+            entrada, parado, leu = CaixaDeEntrada(), threading.Event(), threading.Event()
+            offsets = []
+            def transporte(metodo, url, corpo, cabecalhos, timeout):
+                offsets.append(corpo.get('offset'))
+                if len(offsets) == 1:
+                    return {'ok': True, 'result': [{'update_id': 41,
+                        'message': {'chat': {'id': 1}, 'text': 'oi'}}]}
+                leu.set()
+                parado.wait(1)
+                return {'ok': True, 'result': []}
+            receptor = RecepcaoTelegram(lambda: CanalTelegram(
+                'teste', '1', Store(Path(temp)), transporte), entrada, parado)
+            receptor.iniciar()
+            try:
+                lote = entrada.get(timeout=2)
+                CanalTelegram('teste', '1', dono).confirmar(41)
+                lote['terminado'].set()
+                self.assertTrue(leu.wait(1))
+                self.assertEqual(offsets[:2], [None, 42])
+            finally:
+                parado.set()
+                receptor.thread.join(2)
+
     def test_fala_lenta_nao_bloqueia_e_resposta_antiga_e_descartada(self):
         iniciou, liberar, terminou = threading.Event(), threading.Event(), threading.Event()
         def sintetizar(texto):

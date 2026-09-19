@@ -111,3 +111,15 @@ Para cada modelo ele mede três coisas: quanto tempo até a primeira palavra,
 quantos tokens por segundo depois dela, e quantas vezes ele acerta a chamada de
 ferramenta quando a frase pede uma. Um modelo veloz que erra a chamada não
 serve; um certeiro que demora meio minuto também não.
+
+## Contexto transmitido no híbrido
+
+Ao escolher o híbrido, o provedor remoto recebe as mensagens fornecidas ao modelo:
+persona, exemplos, histórico recente, fatos e pendências inseridos no contexto,
+e resultados de ferramentas usados na resposta. O banco fica local, mas trechos
+dele podem sair no prompt. Não interpretar “texto da conversa” como somente a
+última frase digitada. O híbrido não foi ativado por esta revisão.
+
+O modo local continua padrão. A tarefa de roteamento do plano mestre deve
+acrescentar seleção e redução explícita desse contexto, com uma avaliação
+comparando qualidade, custo e latência reais.

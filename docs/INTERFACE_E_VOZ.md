@@ -136,3 +136,42 @@ conclusão.
 
 O Telegram continua recebendo a resposta inteira de uma vez, com o aviso de
 digitação durante a espera.
+
+## Ajustes e medição da versão 0.3.0
+
+No arquivo de configuração efetivamente indicado por `./zeus check`:
+
+```json
+{
+  "escuta_modelo": "small",
+  "escuta_computo": "int8",
+  "escuta_idioma": "pt",
+  "escuta_threads": 4,
+  "escuta_beam": 1,
+  "escuta_silencio_ms": 500,
+  "escuta_vocabulario": ""
+}
+```
+
+São valores iniciais para medir, não a configuração ótima comprovada do X99.
+Beam maior pode melhorar reconhecimento com custo de processamento. O vocabulário
+aceita nomes curtos específicos; não inserir a conversa inteira nem fatos pessoais.
+A GPU continua destinada ao modelo de conversa.
+
+```bash
+./zeus preparar-escuta
+./zeus medir-escuta /caminho/gravacao.webm --repeticoes 3
+```
+
+O primeiro comando pode baixar o modelo e confirma a carga naquele processo.
+Não mantém um processo aquecido: `run` reutiliza seu próprio motor depois da
+primeira fala. A medição não apaga o arquivo fornecido e não publica a transcrição.
+Compare a primeira rodada com as seguintes, além de ouvir e conferir o acerto.
+Dependências opcionais devem ficar em ambiente virtual, não no Python do sistema.
+
+O texto final agora chega antes do WAV. Um novo turno ou início de gravação
+interrompe a reprodução no navegador. Isso não é ainda cancelamento da geração
+do LLM nem conversa contínua por palavra de ativação. O microfone continua com
+início e parada explícitos e limite de 60 segundos na interface.
+
+Referência: [faster-whisper](https://github.com/SYSTRAN/faster-whisper).

@@ -4,15 +4,17 @@ Assistente pessoal persistente com persona, memória e iniciativa.
 
 ## Estado atual
 
-Entrega 1 — Presença, de 18/09/2026. Zeus conversa com persona carregada de
-arquivo, guarda memória explícita separando fato confirmado de hipótese,
-registra episódios, agenda perguntas e lembretes por decisão própria e entrega
-no Telegram quando o canal está configurado. A resposta volta para o mesmo
-episódio e nenhum aviso é enviado duas vezes, inclusive depois de reinício.
+Versão 0.3.0 — presença, conversa em fluxo, memória compartilhada entre Telegram
+e HUD, escuta local opcional e síntese de voz em segundo plano. O polling do
+Telegram não bloqueia a interface. O contexto mantém a persona e os exemplos
+uma única vez e informa as capacidades de voz disponíveis.
+
+A validação atual e as limitações estão em [Estado do projeto](docs/ESTADO_2026_09_19.md).
+A evolução conjunta segue o [plano mestre](docs/PLANO_MESTRE_EVOLUCAO.md) e o
+[protocolo Codex e Claude](docs/TRABALHO_CONJUNTO.md).
 
 Ainda não existe visão, telefonia, controle de ambiente, pesquisa externa nem
-memória semântica. O contexto entregue ao modelo diz isso explicitamente, para
-que a persona não afirme ter feito o que o sistema não fez.
+memória semântica. Há iniciativa baseada nos combinados e prazos registrados.
 
 O desenvolvimento acontece no computador de Nicolas. O X99 é o destino de
 execução e recebe atualização por `git pull`.

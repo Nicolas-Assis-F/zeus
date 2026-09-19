@@ -91,3 +91,15 @@ Três testes automatizados passaram nesta máquina: persistência e correção a
 - Comando `medir`: tempo até a primeira palavra, tokens por segundo e acerto de chamada de ferramenta, para a escolha de modelo sair de número e não de impressão.
 - Quarenta e sete testes. O fluxo foi verificado em navegador real, contando pacotes dos dois lados: vinte e cinco publicados, vinte e cinco recebidos em ordem, bolha fechada pelo texto final.
 - Dois enganos meus no caminho, ambos por patch aplicado sem conferência: o primeiro quebrou a página no primeiro acesso, o segundo me fez caçar um defeito de streaming que não existia — o script de teste é que não tinha sido atualizado. Toda alteração de arquivo passou a conferir o alvo antes de gravar.
+
+
+## 19 de setembro de 2026 — versão 0.3.0 e coordenação Codex Claude
+
+- Preservado snapshot das 16 alterações locais anteriores em worktree própria; árvore compartilhada não foi sobrescrita.
+- Contexto sem duplicação da entrada e dos exemplos; identidade e exemplos antes do contexto variável.
+- Validação de modelo por fragmento, recusa de fluxo incompleto, ferramentas remotas reconstruídas e contrato híbrido corrigido.
+- Escuta com recuperação, limpeza de arquivos e parâmetros mensuráveis; Telegram e voz em workers próprios, com SQLite próprio no polling.
+- HUD entrega texto antes da síntese, interrompe reprodução ao gravar e solicita tratamento de eco/ruído ao navegador.
+- 69 testes locais passaram, sem serviços externos; há testes HTTP em loopback. HUD conferida em navegador real com dados de teste, sem erros no console.
+- Criados plano de evolução, 17 issues (quadro central e 16 tarefas), critérios de aceitação e divisão proposta entre Codex e Claude.
+- CI e validação de deploy preparadas. Ganho de velocidade, áudio real e ativação no X99 continuam exigindo evidência de hardware.
