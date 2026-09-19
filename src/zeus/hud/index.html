@@ -47,7 +47,9 @@
   }
   button:hover{border-color:#2d4a7a}
   button[disabled]{opacity:.45; cursor:default}
-  #microfone.ativo{border-color:var(--violeta); color:var(--violeta)}
+  #microfone.ativo{border-color:var(--violeta); color:var(--violeta); box-shadow:0 0 0 3px rgba(122,92,255,.18)}
+  .fala.fluindo::after{content:"▌"; color:var(--azul); animation:piscar 1s steps(2) infinite}
+  @keyframes piscar{50%{opacity:0}}
 
   #lateral{border-left:1px solid var(--linha); background:#090b11; overflow-y:auto; padding:20px 16px}
   #lateral section{margin-bottom:22px}
@@ -187,6 +189,33 @@ function escrever(quem, texto, hora){
   $("conversa").scrollTop = $("conversa").scrollHeight;
 }
 
+let BOLHA = null;
+function fluir(pedaco){
+  if (!BOLHA){
+    BOLHA = document.createElement("div");
+    BOLHA.className = "fala zeus fluindo";
+    BOLHA.dataset.texto = "";
+    $("conversa").appendChild(BOLHA);
+  }
+  BOLHA.dataset.texto += pedaco;
+  BOLHA.textContent = BOLHA.dataset.texto;
+  $("conversa").scrollTop = $("conversa").scrollHeight;
+}
+function descartarFluxo(){
+  if (BOLHA){ BOLHA.remove(); BOLHA = null; }
+}
+function fecharFluxo(texto, hora){
+  if (!BOLHA) return false;
+  BOLHA.classList.remove("fluindo");
+  BOLHA.textContent = texto;
+  const marca = document.createElement("span");
+  marca.className = "hora"; marca.textContent = hora || agora();
+  BOLHA.appendChild(marca);
+  BOLHA = null;
+  $("conversa").scrollTop = $("conversa").scrollHeight;
+  return true;
+}
+
 async function enviar(){
   const campo = $("texto");
   const texto = campo.value.trim();
@@ -223,32 +252,89 @@ function tocar(url){
   }catch(e){ mudarEstado("ocioso", "—"); }
 }
 
-/* -------------------------------------------------- ditado pelo navegador */
+/* ------------------------------------------------------------- microfone */
+/* Dois caminhos, em ordem de honestidade:
+   1. escuta local — o navegador grava e manda o áudio para o Zeus, que
+      transcreve no próprio X99 com faster-whisper. O áudio não sai de casa.
+   2. ditado do navegador — só quando a escuta local não está disponível, e
+      com aviso, porque o áudio vai para o serviço do navegador.
+   getUserMedia exige origem segura: em http puro nenhum dos dois existe.    */
+let OUVIDOS_LOCAIS = false;
+let gravador = null, pedacos = [], gravando = false, limiteDeGravacao = null;
+
+function podeGravar(){
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+}
+
+async function alternarGravacao(){
+  if (gravando){ pararGravacao(); return; }
+  try{
+    const trilha = await navigator.mediaDevices.getUserMedia({audio:true});
+    gravador = new MediaRecorder(trilha, MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? {mimeType:"audio/webm;codecs=opus"} : {});
+    pedacos = [];
+    gravador.ondataavailable = (e) => { if (e.data && e.data.size) pedacos.push(e.data); };
+    gravador.onstop = async () => {
+      trilha.getTracks().forEach((t) => t.stop());
+      gravando = false;
+      $("microfone").classList.remove("ativo");
+      clearTimeout(limiteDeGravacao);
+      const audio = new Blob(pedacos, {type: gravador.mimeType || "audio/webm"});
+      if (audio.size < 1200){ mudarEstado("ocioso","áudio curto demais"); return; }
+      mudarEstado("ouvindo","enviando para transcrever");
+      try{
+        const r = await fetch("/escuta?chave=" + encodeURIComponent(CHAVE), {
+          method:"POST", headers:{"Content-Type": audio.type}, body: audio});
+        if (!r.ok) throw new Error(r.status);
+      }catch(e){
+        mudarEstado("offline","falha ao enviar o áudio");
+        escrever("sistema","Não consegui entregar o áudio ao Zeus.");
+      }
+    };
+    gravador.start();
+    gravando = true;
+    $("microfone").classList.add("ativo");
+    mudarEstado("ouvindo","gravando — clique para parar");
+    limiteDeGravacao = setTimeout(pararGravacao, 60000);
+  }catch(e){
+    escrever("sistema","O navegador não liberou o microfone. Em rede local isso costuma ser origem insegura: abra a interface por https.");
+    mudarEstado("ocioso","—");
+  }
+}
+function pararGravacao(){ if (gravador && gravando) gravador.stop(); }
+
 const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (!Reconhecimento){
-  $("microfone").disabled = true;
-  $("microfone").title = "Este navegador não oferece ditado";
-} else {
-  const ouvinte = new Reconhecimento();
-  ouvinte.lang = "pt-BR"; ouvinte.interimResults = false; ouvinte.continuous = false;
-  let ouvindo = false;
-  $("microfone").onclick = () => {
-    if (ouvindo){ ouvinte.stop(); return; }
-    // O ditado usa o serviço do próprio navegador: o áudio sai do computador.
-    // Por isso ele é um botão, nunca o padrão.
-    if (!sessionStorage.getItem("zeus_ditado_ok")){
-      if (!confirm("O ditado usa o reconhecimento de voz do navegador, que envia o áudio para o serviço dele. O texto digitado continua local. Deseja usar mesmo assim?")) return;
-      try { sessionStorage.setItem("zeus_ditado_ok","1"); } catch(e){}
-    }
-    ouvinte.start();
-  };
-  ouvinte.onstart = () => { ouvindo = true; $("microfone").classList.add("ativo"); mudarEstado("ouvindo","ditado do navegador"); };
-  ouvinte.onend = () => { ouvindo = false; $("microfone").classList.remove("ativo"); if (ESTADO === "ouvindo") mudarEstado("ocioso","—"); };
-  ouvinte.onresult = (e) => {
-    const dito = e.results[0][0].transcript;
-    $("texto").value = ($("texto").value + " " + dito).trim();
-    enviar();
-  };
+let ditado = null;
+if (Reconhecimento){
+  ditado = new Reconhecimento();
+  ditado.lang = "pt-BR"; ditado.interimResults = false; ditado.continuous = false;
+  ditado.onstart = () => { $("microfone").classList.add("ativo"); mudarEstado("ouvindo","ditado do navegador"); };
+  ditado.onend = () => { $("microfone").classList.remove("ativo"); if (ESTADO === "ouvindo") mudarEstado("ocioso","—"); };
+  ditado.onresult = (e) => { $("texto").value = ($("texto").value + " " + e.results[0][0].transcript).trim(); enviar(); };
+}
+
+function ditarPeloNavegador(){
+  if (!sessionStorage.getItem("zeus_ditado_ok")){
+    if (!confirm("A escuta local não está disponível agora. O ditado do navegador envia o áudio para o serviço dele. Usar mesmo assim?")) return;
+    try { sessionStorage.setItem("zeus_ditado_ok","1"); } catch(e){}
+  }
+  try { ditado.start(); } catch(e){}
+}
+
+$("microfone").onclick = () => {
+  if (OUVIDOS_LOCAIS && podeGravar()) return alternarGravacao();
+  if (ditado) return ditarPeloNavegador();
+  escrever("sistema","Sem escuta: a local não está instalada e este navegador não oferece ditado. Veja docs/INTERFACE_E_VOZ.md.");
+};
+
+function ajustarMicrofone(estado){
+  OUVIDOS_LOCAIS = !!estado.ouvidos;
+  const local = OUVIDOS_LOCAIS && podeGravar();
+  $("microfone").disabled = !local && !ditado;
+  $("microfone").title = local
+    ? "Falar — transcrição local no Zeus"
+    : (ditado ? "Ditado do navegador (o áudio sai do computador)"
+              : (estado.motivo_ouvidos || "escuta indisponível"));
 }
 
 /* ---------------------------------------------------------------- estado */
@@ -274,7 +360,9 @@ function pintarEstado(estado){
   listar("fatos", estado.fatos, "memória vazia", (f) => [f.value, f.key]);
   $("subtitulo").textContent = estado.modelo
     ? estado.modelo + (estado.voz ? " · voz local" : " · sem voz")
+                    + (estado.ouvidos ? " · ouvidos locais" : "")
     : "presença local";
+  ajustarMicrofone(estado);
 }
 async function carregarEstado(){
   try{
@@ -297,8 +385,16 @@ function abrirFluxo(){
   fluxo.onmessage = (evento) => {
     let pacote; try{ pacote = JSON.parse(evento.data); }catch(e){ return; }
     if (pacote.tipo === "estado"){ pintarEstado(pacote); }
+    else if (pacote.tipo === "fluxo"){
+      if (pacote.reiniciar) descartarFluxo(); else fluir(pacote.pedaco || "");
+      if (ESTADO !== "pensando") mudarEstado("pensando","escrevendo");
+    }
     else if (pacote.tipo === "mensagem"){
-      escrever(pacote.de === "zeus" ? "zeus" : "nicolas", pacote.texto, pacote.hora);
+      const classe = pacote.de === "zeus" ? "zeus" : (pacote.de === "sistema" ? "sistema" : "nicolas");
+      if (classe !== "zeus" || !fecharFluxo(pacote.texto, pacote.hora)){
+        if (classe === "zeus") descartarFluxo();
+        escrever(classe, pacote.texto, pacote.hora);
+      }
       if (pacote.audio) tocar(pacote.audio); else mudarEstado("ocioso","—");
     }
     else if (pacote.tipo === "situacao"){ mudarEstado(pacote.estado, pacote.detalhe); }

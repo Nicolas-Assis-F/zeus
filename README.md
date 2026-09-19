@@ -41,6 +41,7 @@ Com modelo e canal configurados (veja `docs/CONFIGURACAO.md`):
 ./zeus check --modelo --canal
 ./zeus conversar "vou treinar mais tarde"
 ./zeus agenda
+./zeus medir --modelos llama3.1:8b-instruct-q4_K_M,qwen2.5:7b-instruct
 ```
 
 Com `chave_hud` definida, `./zeus run` também sobe a interface no navegador e
@@ -73,6 +74,7 @@ forense e não remove cópias de segurança anteriores.
 | `canais/` | Telegram e canal em memória para teste |
 | `hud/` | Interface no navegador, servida pelo próprio processo |
 | `voz.py` | Síntese local com Piper, opcional |
+| `ouvidos.py` | Escuta local com faster-whisper, opcional |
 
 ## Documentação
 

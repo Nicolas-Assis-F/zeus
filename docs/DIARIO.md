@@ -80,3 +80,14 @@ Três testes automatizados passaram nesta máquina: persistência e correção a
 - Entregue a voz que sai: Piper na CPU, opcional, com diagnóstico honesto quando ausente. A voz que entra continua sendo ditado do navegador, com confirmação explícita, porque escuta local depende de microfone que ainda não existe.
 - Um defeito real apareceu no teste de fumaça antes de qualquer uso: a conexão SQLite não atravessa thread, e o manipulador HTTP quebrava no primeiro acesso à página. O estado passou a ser um retrato em cache alimentado pelo laço principal.
 - Quarenta testes passando. A página foi verificada em navegador de verdade, com captura de tela e console limpo.
+
+## 19 de setembro de 2026 — potência, voz e ouvidos
+
+- Direção dada por Nicolas: avançar no Zeus antes do hardware, com voz, ouvidos e mais potência. O plano mestre v2 guiou as três escolhas.
+- Resposta em fluxo. O plano pede resposta inicial útil em até dois segundos; a 9,8 tokens por segundo isso é impossível com a resposta aparecendo pronta. A conversa na interface passou a ser transmitida token a token, com cursor enquanto ele escreve. Quando o modelo começa a escrever e decide usar ferramenta, o rascunho é descartado da tela.
+- Ouvidos locais. O navegador grava, o X99 transcreve com faster-whisper na CPU, e o áudio não sai da rede. A GPU continua inteira com o modelo de conversa.
+- Origem segura. O navegador só libera microfone em https, então a HUD passou a gerar certificado próprio e subir em TLS. Sem isso o Zeus ficaria sem ouvidos justamente no aparelho que tem microfone.
+- Híbrido seletivo, como no item 9 do plano: modelo local decide e usa ferramenta a temperatura zero, modelo remoto conduz a conversa. Memória, agenda e decisão continuam em casa.
+- Comando `medir`: tempo até a primeira palavra, tokens por segundo e acerto de chamada de ferramenta, para a escolha de modelo sair de número e não de impressão.
+- Quarenta e sete testes. O fluxo foi verificado em navegador real, contando pacotes dos dois lados: vinte e cinco publicados, vinte e cinco recebidos em ordem, bolha fechada pelo texto final.
+- Dois enganos meus no caminho, ambos por patch aplicado sem conferência: o primeiro quebrou a página no primeiro acesso, o segundo me fez caçar um defeito de streaming que não existia — o script de teste é que não tinha sido atualizado. Toda alteração de arquivo passou a conferir o alvo antes de gravar.

@@ -11,6 +11,7 @@ import os
 import queue
 import secrets
 import signal
+import time
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ from .ferramentas import Ferramentas
 from .llm import ErroDeModelo, criar_provedor
 from .nucleo import Zeus
 from .persona import Persona
+from .ouvidos import Ouvidos
 from .store import Store
 from .voz import Voz
 
@@ -76,7 +78,12 @@ def montar_voz(config):
     return Voz(config.voz_binario, config.voz_modelo)
 
 
-def retrato(store, config, voz, modelo=""):
+def montar_ouvidos(config, estado):
+    return Ouvidos(config.escuta_modelo, config.escuta_computo, config.escuta_idioma,
+                   destino=Path(estado) / "escuta")
+
+
+def retrato(store, config, voz, modelo="", ouvidos=None):
     """O que a HUD mostra: memória confirmada, pendências e conversa recente."""
     return {
         "tipo": "estado",
@@ -86,6 +93,8 @@ def retrato(store, config, voz, modelo=""):
         "turnos": store.turnos(20),
         "modelo": modelo or config.modelo,
         "voz": voz.disponivel() if voz else False,
+        "ouvidos": ouvidos.disponivel() if ouvidos else False,
+        "motivo_ouvidos": ouvidos.diagnostico() if ouvidos else "desligada",
     }
 
 
@@ -110,6 +119,11 @@ def main():
 
     commands.add_parser("run", help="Manter o Zeus em execução")
     commands.add_parser("agenda", help="Listar perguntas e lembretes pendentes")
+
+    medicao = commands.add_parser("medir", help="Comparar modelos com números, não com palpite")
+    medicao.add_argument("--modelos", default="",
+                         help="Lista separada por vírgula; sem isso, mede o configurado")
+    medicao.add_argument("--repeticoes", type=int, default=3)
     commands.add_parser("persona", help="Mostrar o contexto que o modelo recebe")
 
     remember = commands.add_parser("remember", help="Registrar um fato explícito")
@@ -148,8 +162,10 @@ def main():
             if args.canal:
                 canal = "ausente" if zeus.canal is None else zeus.canal.verificar()
             voz = montar_voz(config)
+            ouvidos = montar_ouvidos(config, args.state_dir.expanduser())
             emit("storage_check", version=__version__, storage=integrity,
                  modelo=modelo, canal=canal, voz=voz.diagnostico(),
+                 ouvidos=ouvidos.diagnostico(),
                  hud="configurada" if config.chave_hud else "sem chave definida",
                  config=config.sem_segredos())
             return 0 if integrity == "ok" else 1
@@ -172,6 +188,8 @@ def main():
         elif args.command == "evento":
             episodio = zeus.perceber(args.tipo, args.resumo, simulado=args.simulado)
             emit("episodio_aberto", id=episodio, simulado=args.simulado)
+        elif args.command == "medir":
+            return medir(config, zeus, args)
         elif args.command == "conversar":
             ligar_modelo(zeus, config)
             print(zeus.conversar(args.texto, canal="cli"))
@@ -188,6 +206,73 @@ def main():
         store.close()
 
 
+PROVA_DE_CONVERSA = "Me conta em duas frases o que você faz por mim."
+PROVA_DE_FERRAMENTA = "me lembra de tomar água daqui 30 minutos"
+
+
+def medir(config, zeus, args):
+    """Compara modelos com números do próprio servidor.
+
+    Três coisas decidem a escolha e nenhuma delas é impressão: quanto tempo até
+    a primeira palavra, quantos tokens por segundo depois dela, e se o modelo
+    consegue usar uma ferramenta quando a frase pede uma. Um modelo veloz que
+    erra a chamada não serve; um modelo certeiro que demora meio minuto também
+    não."""
+    from .llm import ProvedorOllama
+
+    modelos = [m.strip() for m in args.modelos.split(",") if m.strip()] or [config.modelo]
+    sistema = zeus.persona.sistema(agora=datetime.now(timezone.utc))
+    catalogo = zeus.ferramentas.catalogo()
+
+    for nome in modelos:
+        provedor = ProvedorOllama(config.ollama_url, nome, keep_alive=config.keep_alive,
+                                  limite_de_resposta=config.limite_de_resposta)
+        try:
+            provedor.verificar()
+        except ErroDeModelo as erro:
+            emit("medicao", modelo=nome, erro=str(erro)[:160])
+            continue
+
+        primeiras, geracoes, leituras, acertos = [], [], [], 0
+        for _ in range(max(1, args.repeticoes)):
+            marca = {"inicio": time.perf_counter(), "primeira": None}
+
+            def cronometrar(_pedaco):
+                if marca["primeira"] is None:
+                    marca["primeira"] = time.perf_counter() - marca["inicio"]
+
+            conversa = provedor.conversar_em_fluxo(
+                [{"role": "system", "content": sistema},
+                 {"role": "user", "content": PROVA_DE_CONVERSA}],
+                temperatura=config.temperatura_conversa, ao_receber=cronometrar)
+            if marca["primeira"] is not None:
+                primeiras.append(marca["primeira"])
+            estatisticas = conversa.estatisticas
+            if estatisticas.get("eval_duration"):
+                geracoes.append(estatisticas["eval_count"] * 1e9 / estatisticas["eval_duration"])
+            if estatisticas.get("prompt_eval_duration"):
+                leituras.append(estatisticas["prompt_eval_count"] * 1e9
+                                / estatisticas["prompt_eval_duration"])
+
+            uso = provedor.conversar(
+                [{"role": "system", "content": sistema},
+                 {"role": "user", "content": PROVA_DE_FERRAMENTA}],
+                ferramentas=catalogo, temperatura=0.0)
+            nomes = {c["nome"] for c in uso.chamadas}
+            if nomes & {"agendar_lembrete", "agendar_pergunta"}:
+                acertos += 1
+
+        def media(valores):
+            return round(sum(valores) / len(valores), 2) if valores else None
+
+        emit("medicao", modelo=nome,
+             primeira_palavra_s=media(primeiras),
+             geracao_tokens_s=media(geracoes),
+             leitura_tokens_s=media(leituras),
+             ferramenta_acertos=f"{acertos}/{max(1, args.repeticoes)}")
+    return 0
+
+
 def executar(zeus, store, config):
     stopped = Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
@@ -201,37 +286,59 @@ def executar(zeus, store, config):
         servido = f"indisponível: {erro}"
 
     voz = montar_voz(config)
+    estado_local = Path(store.path).parent
+    ouvidos = montar_ouvidos(config, estado_local)
     recebidas_da_hud = queue.Queue(maxsize=32)
     hud, endereco = None, None
     chave = config.chave_hud or secrets.token_urlsafe(12)
     try:
-        from .hud import ServidorHUD
+        from .hud import ServidorHUD, endereco_local, garantir_certificado
+        certificado, chave_tls = (None, None)
+        if config.hud_tls:
+            # Sem origem segura o navegador não libera o microfone, e o Zeus
+            # ficaria sem ouvidos justamente no aparelho que tem microfone.
+            certificado, chave_tls = garantir_certificado(estado_local / "tls")
+            if certificado is None:
+                emit("tls_indisponivel", detalhe="openssl ausente; a HUD sobe sem TLS")
         hud = ServidorHUD(
             enfileirar=recebidas_da_hud.put_nowait, voz=voz, chave=chave,
             host=config.hud_host, porta=config.hud_porta,
-            estado=retrato(store, config, voz, servido if modelo_ok else ""))
+            estado=retrato(store, config, voz, servido if modelo_ok else "", ouvidos),
+            pasta_de_escuta=ouvidos.destino,
+            certificado=certificado, chave_tls=chave_tls)
         porta = hud.iniciar()
-        endereco = f"http://{config.hud_host}:{porta}/?chave={chave}"
+        esquema = "https" if hud.seguro else "http"
+        endereco = f"{esquema}://{endereco_local()}:{porta}/?chave={chave}"
     except Exception as erro:
         emit("hud_indisponivel", detalhe=str(erro)[:200])
 
     emit("started", version=__version__, modelo=servido, modelo_ok=modelo_ok,
          canal=(zeus.canal.nome if zeus.canal else "nenhum"),
-         voz=voz.diagnostico(), hud=endereco or "desligada")
+         voz=voz.diagnostico(), ouvidos=ouvidos.diagnostico(),
+         hud=endereco or "desligada")
 
     def anunciar(de, texto, audio=None):
         if hud is None:
             return
         hud.publicar("mensagem", de=de, texto=texto, audio=audio,
                      hora=datetime.now().strftime("%H:%M"))
-        hud.atualizar(retrato(store, config, voz, servido if modelo_ok else ""))
+        hud.atualizar(retrato(store, config, voz, servido if modelo_ok else "", ouvidos))
 
-    def responder(texto, canal):
+    def responder(texto, canal, em_fluxo=False):
         """Uma pergunta, uma resposta, a mesma identidade em qualquer canal."""
         if not modelo_ok:
             store.registrar_turno(canal, "nicolas", texto)
             return SEM_MODELO
-        return zeus.conversar(texto, canal=canal)
+        if not (em_fluxo and hud is not None):
+            return zeus.conversar(texto, canal=canal)
+
+        def empurrar(pedaco):
+            if pedaco is None:
+                hud.publicar("fluxo", reiniciar=True)
+            else:
+                hud.publicar("fluxo", pedaco=pedaco)
+
+        return zeus.conversar(texto, canal=canal, ao_receber=empurrar)
 
     espera = min(config.espera_telegram, 10)
     ultimo_batimento = 0.0
@@ -254,12 +361,29 @@ def executar(zeus, store, config):
 
             while True:
                 try:
-                    texto = recebidas_da_hud.get_nowait()
+                    pedido = recebidas_da_hud.get_nowait()
                 except queue.Empty:
                     break
+                texto = pedido.get("texto", "")
+                if pedido.get("tipo") == "audio":
+                    if hud is not None:
+                        hud.publicar("situacao", estado="ouvindo",
+                                     detalhe="transcrevendo aqui mesmo")
+                    texto = ouvidos.transcrever(pedido.get("arquivo", ""))
+                    if not texto:
+                        if hud is not None:
+                            hud.publicar("mensagem", de="sistema",
+                                         texto="Não entendi o áudio. " + ouvidos.diagnostico())
+                            hud.publicar("situacao", estado="ocioso", detalhe="—")
+                        continue
+                    if hud is not None:
+                        hud.publicar("mensagem", de="nicolas", texto=texto,
+                                     hora=datetime.now().strftime("%H:%M"))
+                if not texto:
+                    continue
                 if hud is not None:
                     hud.publicar("situacao", estado="pensando", detalhe="gerando resposta")
-                resposta = responder(texto, "hud")
+                resposta = responder(texto, "hud", em_fluxo=True)
                 arquivo = voz.falar(resposta)
                 anunciar("zeus", resposta,
                          audio=f"/audio/{arquivo.name}" if arquivo else None)

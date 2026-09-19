@@ -48,11 +48,11 @@ class Servidor(unittest.TestCase):
 
     def test_mensagem_entra_na_fila_do_laco_principal(self):
         self.assertEqual(self.pedir("/mensagem", {"texto": "bom dia"})[0], 202)
-        self.assertEqual(self.recebidas, ["bom dia"])
+        self.assertEqual(self.recebidas, [{"tipo": "texto", "texto": "bom dia"}])
         self.assertEqual(self.pedir("/mensagem", {"texto": "   "})[0], 400)
         self.assertEqual(self.pedir("/mensagem", corpo_bruto=b"nao e json")[0], 400)
         self.assertEqual(self.pedir("/mensagem", {"texto": "x" * 5000})[0], 413)
-        self.assertEqual(self.recebidas, ["bom dia"])
+        self.assertEqual(self.recebidas, [{"tipo": "texto", "texto": "bom dia"}])
 
     def test_rotas_desconhecidas_e_audio_inexistente(self):
         self.assertEqual(self.pedir("/qualquer")[0], 404)
