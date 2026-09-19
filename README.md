@@ -49,6 +49,7 @@ Com modelo e canal configurados (veja `docs/CONFIGURACAO.md`):
 ./zeus conversar "vou treinar mais tarde"
 ./zeus agenda
 ./zeus avaliar
+./zeus avaliar-persona --variantes config/persona.md,config/persona-b.md
 ./zeus medir --modelos llama3.1:8b-instruct-q4_K_M,qwen2.5:7b-instruct
 ```
 

@@ -155,6 +155,23 @@ def main():
     avaliacao_cmd.add_argument("--relatorio", default=None,
                                help="Onde gravar o relatório em JSON")
 
+    persona_cega_cmd = commands.add_parser(
+        "avaliar-persona",
+        help="Comparar variantes de persona.md com julgamento cego")
+    persona_cega_cmd.add_argument("--variantes", default="",
+                                  help="Arquivos de persona separados por vírgula")
+    persona_cega_cmd.add_argument("--jornadas", default=None)
+    persona_cega_cmd.add_argument("--real", action="store_true",
+                                  help="Falar com o modelo instalado em vez do dublê")
+    persona_cega_cmd.add_argument("--folha", default=None,
+                                  help="Onde gravar a folha cega para julgar")
+    persona_cega_cmd.add_argument("--rodada", default=None,
+                                  help="Onde gravar (ou de onde ler) a rodada com o gabarito selado")
+    persona_cega_cmd.add_argument("--revelar", action="store_true",
+                                  help="Revelar o agregado a partir de --rodada e --julgamento")
+    persona_cega_cmd.add_argument("--julgamento", default=None,
+                                  help="JSON com as notas por rótulo, para revelar")
+
     medicao = commands.add_parser("medir", help="Comparar modelos com números, não com palpite")
     medicao.add_argument("--modelos", default="",
                          help="Lista separada por vírgula; sem isso, mede o configurado")
@@ -272,6 +289,8 @@ def main():
             emit("episodio_aberto", id=episodio, simulado=args.simulado)
         elif args.command == "avaliar":
             return avaliar(config, args)
+        elif args.command == "avaliar-persona":
+            return avaliar_persona(config, args)
         elif args.command == "medir":
             return medir(config, zeus, args)
         elif args.command == "conversar":
@@ -315,6 +334,59 @@ def avaliar(config, args):
             json.dumps(relatorio, ensure_ascii=False, indent=1), encoding="utf-8")
         emit("relatorio_gravado", arquivo=args.relatorio)
     return 1 if relatorio["resumo"]["falhou"] else 0
+
+
+def avaliar_persona(config, args):
+    """Duas fases num comando. Sem --revelar: roda as variantes e grava a folha
+    cega para Nicolas julgar. Com --revelar: liga rótulo a variante e agrega."""
+    import tempfile
+
+    from .persona_cega import (AvaliacaoCegaDePersona, carregar_jornadas_de_persona,
+                               em_texto_revelacao, folha_cega, gravar_historico,
+                               revelar)
+
+    if args.revelar:
+        if not (args.rodada and args.julgamento):
+            emit("erro", detalhe="--revelar precisa de --rodada e --julgamento")
+            return 2
+        rodada = json.loads(Path(args.rodada).read_text(encoding="utf-8"))
+        julgamento = json.loads(Path(args.julgamento).read_text(encoding="utf-8"))
+        revelacao = revelar(rodada, julgamento)
+        print(em_texto_revelacao(revelacao))
+        destino = gravar_historico(
+            args.state_dir.expanduser() / "persona_cega", revelacao)
+        emit("revelacao_gravada", arquivo=str(destino))
+        return 0
+
+    variantes = [v.strip() for v in (args.variantes or "").split(",") if v.strip()]
+    if len(variantes) < 2:
+        emit("erro", detalhe="informe ao menos duas variantes em --variantes")
+        return 2
+
+    jornadas = carregar_jornadas_de_persona(args.jornadas)
+    provedor, origem = None, "simulada"
+    if args.real:
+        provedor = criar_provedor(config)
+        provedor.verificar()
+        origem = "hardware"
+
+    with tempfile.TemporaryDirectory() as temporario:
+        avaliacao = AvaliacaoCegaDePersona(config, temporario, variantes,
+                                           provedor=provedor, origem=origem)
+        rodada = avaliacao.gerar(jornadas)
+
+    folha = folha_cega(rodada)
+    caminho_folha = args.folha or "persona-cega-folha.json"
+    Path(caminho_folha).write_text(
+        json.dumps(folha, ensure_ascii=False, indent=1), encoding="utf-8")
+    caminho_rodada = args.rodada or "persona-cega-rodada.json"
+    Path(caminho_rodada).write_text(
+        json.dumps(rodada, ensure_ascii=False, indent=1), encoding="utf-8")
+    emit("folha_cega_gravada", folha=caminho_folha, rodada=caminho_rodada,
+         origem=origem, variantes=len(variantes),
+         aviso=("dublê: não vale como evidência de tom; rode --real no X99"
+                if origem == "simulada" else "modelo real"))
+    return 0
 
 
 PROVA_DE_CONVERSA = "Me conta em duas frases o que você faz por mim."
