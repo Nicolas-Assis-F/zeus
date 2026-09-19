@@ -49,6 +49,7 @@ class Config:
     temperatura_conversa: float = 0.75
     temperatura_decisao: float = 0.0
     turnos_de_conversa: int = 12
+    teto_de_contexto: int = 600
     intervalo_agenda: int = 30
     espera_telegram: int = 25
     # Preenchido por carregar(): dizer de onde a configuração veio evita a
