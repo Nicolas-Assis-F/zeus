@@ -20,6 +20,7 @@ from threading import Event, Thread
 from . import __version__
 from .config import carregar as carregar_config
 from .ferramentas import Ferramentas
+from .execucao import CaixaDeEntrada, FalaEmSegundoPlano, RecepcaoTelegram
 from .llm import ErroDeModelo, criar_provedor
 from .nucleo import Zeus
 from .persona import Persona
@@ -80,7 +81,9 @@ def montar_voz(config):
 
 def montar_ouvidos(config, estado):
     return Ouvidos(config.escuta_modelo, config.escuta_computo, config.escuta_idioma,
-                   destino=Path(estado) / "escuta")
+                   threads=config.escuta_threads, destino=Path(estado) / "escuta",
+                   beam_size=config.escuta_beam, silencio_ms=config.escuta_silencio_ms,
+                   vocabulario=config.escuta_vocabulario)
 
 
 def retrato(store, config, voz, modelo="", ouvidos=None):
@@ -124,6 +127,10 @@ def main():
     medicao.add_argument("--modelos", default="",
                          help="Lista separada por vírgula; sem isso, mede o configurado")
     medicao.add_argument("--repeticoes", type=int, default=3)
+    commands.add_parser("preparar-escuta", help="Baixar e verificar o modelo de escuta")
+    escuta = commands.add_parser("medir-escuta", help="Medir um áudio local sem apagá-lo")
+    escuta.add_argument("arquivo", type=Path)
+    escuta.add_argument("--repeticoes", type=int, default=2)
     commands.add_parser("persona", help="Mostrar o contexto que o modelo recebe")
 
     remember = commands.add_parser("remember", help="Registrar um fato explícito")
@@ -154,11 +161,13 @@ def main():
         if args.command == "check":
             integrity = store.connection.execute("PRAGMA quick_check").fetchone()[0]
             modelo, canal = "não verificado", "não verificado"
+            modelo_verificado = True
             if args.modelo:
                 try:
                     modelo = ligar_modelo(zeus, config)
                 except ErroDeModelo as erro:
                     modelo = f"falhou: {erro}"
+                    modelo_verificado = False
             if args.canal:
                 canal = "ausente" if zeus.canal is None else zeus.canal.verificar()
             voz = montar_voz(config)
@@ -168,7 +177,7 @@ def main():
                  ouvidos=ouvidos.diagnostico(),
                  hud="configurada" if config.chave_hud else "sem chave definida",
                  config=config.sem_segredos())
-            return 0 if integrity == "ok" else 1
+            return 0 if integrity == "ok" and modelo_verificado else 1
 
         if args.command == "remember":
             store.remember(args.key, args.value, args.source, args.estado)
@@ -182,6 +191,23 @@ def main():
         elif args.command == "agenda":
             emit("agenda", perguntas=store.perguntas_abertas(),
                  lembretes=store.agenda_pendente())
+        elif args.command in ("preparar-escuta", "medir-escuta"):
+            ouvidos = montar_ouvidos(config, args.state_dir.expanduser())
+            if args.command == "preparar-escuta":
+                pronto = ouvidos.preparar()
+                emit("escuta_preparada", pronta=pronto, detalhe=ouvidos.diagnostico())
+                return 0 if pronto else 3
+            if not args.arquivo.is_file():
+                raise ValueError("Arquivo de áudio não encontrado.")
+            falhou = False
+            for tentativa in range(max(1, args.repeticoes)):
+                ouvidos.transcrever(args.arquivo, remover=False)
+                medicao = ouvidos.ultima_medicao
+                falhou = falhou or not bool(medicao)
+                emit("medicao_escuta", tentativa=tentativa + 1, modelo=ouvidos.modelo,
+                     threads=ouvidos.threads, beam=ouvidos.beam_size,
+                     detalhe=ouvidos.diagnostico(), **medicao)
+            return 3 if falhou else 0
         elif args.command == "persona":
             print(zeus.persona.sistema(store.fatos(), store.perguntas_abertas(),
                                        store.agenda_pendente(), datetime.now(timezone.utc)))
@@ -288,7 +314,7 @@ def executar(zeus, store, config):
     voz = montar_voz(config)
     estado_local = Path(store.path).parent
     ouvidos = montar_ouvidos(config, estado_local)
-    recebidas_da_hud = queue.Queue(maxsize=32)
+    recebidas_da_hud = CaixaDeEntrada(maxsize=32)
     hud, endereco = None, None
     chave = config.chave_hud or secrets.token_urlsafe(12)
     try:
@@ -340,30 +366,41 @@ def executar(zeus, store, config):
 
         return zeus.conversar(texto, canal=canal, ao_receber=empurrar)
 
-    espera = min(config.espera_telegram, 10)
+    fala = FalaEmSegundoPlano(voz, hud.publicar) if hud is not None else None
+    recepcao = None
+    if zeus.canal is not None:
+        def criar_receptor():
+            from .canais import CanalTelegram
+            return CanalTelegram(config.telegram_token, config.telegram_chat_id,
+                                 Store(estado_local), espera=config.espera_telegram)
+        recepcao = RecepcaoTelegram(criar_receptor, recebidas_da_hud, stopped)
+        recepcao.iniciar()
     ultimo_batimento = 0.0
     while not stopped.is_set():
         try:
-            if zeus.canal is not None:
-                # Mensagens que chegaram juntas viram um turno só. Responder
-                # "opa" e "bom?" separadamente gasta duas gerações e entrega as
-                # respostas fora de ordem, como se ele estivesse atrasado.
-                recebidas = zeus.canal.receber(espera)
-                if recebidas:
-                    texto = "\n".join(m["texto"] for m in recebidas)
-                    anunciar("nicolas", texto)
-                    resposta = com_aviso_de_digitacao(
-                        zeus.canal, lambda: responder(texto, "telegram"))
-                    zeus.canal.enviar(resposta)
-                    for mensagem in recebidas:
-                        zeus.canal.confirmar(mensagem["id"])
-                    anunciar("zeus", resposta)
-
-            while True:
+            for _ in range(4):
                 try:
                     pedido = recebidas_da_hud.get_nowait()
                 except queue.Empty:
                     break
+                geracao = fala.invalidar() if fala else 0
+                if hud is not None:
+                    hud.publicar("situacao", estado="pensando", detalhe="recebido", geracao=geracao)
+                zeus.capacidades = {"voz": voz.disponivel(), "ouvidos": ouvidos.disponivel()}
+                if pedido.get("tipo") == "telegram":
+                    recebidas = pedido["mensagens"]
+                    try:
+                        texto = "\n".join(m["texto"] for m in recebidas)
+                        anunciar("nicolas", texto)
+                        resposta = com_aviso_de_digitacao(
+                            zeus.canal, lambda: responder(texto, "telegram"))
+                        zeus.canal.enviar(resposta)
+                        for mensagem in recebidas:
+                            zeus.canal.confirmar(mensagem["id"])
+                        anunciar("zeus", resposta)
+                    finally:
+                        pedido["terminado"].set()
+                    continue
                 texto = pedido.get("texto", "")
                 if pedido.get("tipo") == "audio":
                     if hud is not None:
@@ -384,24 +421,29 @@ def executar(zeus, store, config):
                 if hud is not None:
                     hud.publicar("situacao", estado="pensando", detalhe="gerando resposta")
                 resposta = responder(texto, "hud", em_fluxo=True)
-                arquivo = voz.falar(resposta)
-                anunciar("zeus", resposta,
-                         audio=f"/audio/{arquivo.name}" if arquivo else None)
+                anunciar("zeus", resposta)
+                if fala and voz.disponivel():
+                    fala.falar(resposta, geracao)
 
             for aviso in zeus.tick():
                 emit("aviso_enviado", **aviso)
                 anunciar("zeus", aviso["texto"])
         except Exception as erro:  # o ciclo não morre por falha de rede
             emit("falha_no_ciclo", detalhe=str(erro)[:200])
-            stopped.wait(5)
-        if zeus.canal is None:
-            stopped.wait(min(config.intervalo_agenda, 5))
+            if hud is not None:
+                hud.publicar("fluxo", reiniciar=True)
+                hud.publicar("mensagem", de="sistema",
+                             texto="Não consegui concluir esta resposta. Pode tentar novamente.")
+            stopped.wait(0.5)
+        recebidas_da_hud.aguardar(min(max(config.intervalo_agenda, 0.1), 1))
         agora = datetime.now(timezone.utc).timestamp()
         if agora - ultimo_batimento >= 30:
             store.connection.execute("SELECT 1").fetchone()
             emit("heartbeat", storage="ok")
             ultimo_batimento = agora
 
+    if fala is not None:
+        fala.parar()
     if hud is not None:
         hud.parar()
     emit("stopped")

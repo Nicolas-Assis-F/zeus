@@ -34,9 +34,14 @@ class CanalTelegram:
         return f"https://api.telegram.org/bot{self.token}/{metodo}"
 
     def _chamar(self, metodo: str, corpo=None, timeout=None):
-        dados = self.transporte("POST" if corpo is not None else "GET",
-                                self._url(metodo), corpo, None,
-                                timeout or (self.espera + 15))
+        try:
+            dados = self.transporte("POST" if corpo is not None else "GET",
+                                    self._url(metodo), corpo, None,
+                                    timeout or (self.espera + 15))
+        except Exception:
+            # O transporte inclui a URL no erro e a URL do Telegram contém o
+            # token. A fronteira do canal remove esse detalhe antes dos logs.
+            raise ErroDeCanal(f"Falha de comunicação com Telegram em {metodo}.") from None
         if not dados.get("ok", False):
             raise ErroDeCanal(f"Telegram recusou {metodo}: {dados.get('description', 'sem motivo')}")
         return dados.get("result")

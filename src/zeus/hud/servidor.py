@@ -183,6 +183,30 @@ def _construir(hud: ServidorHUD):
         def _json(self, codigo, dados):
             self._responder(codigo, json.dumps(dados, ensure_ascii=False).encode("utf-8"))
 
+        def _tamanho(self, limite):
+            try:
+                tamanho = int(self.headers.get("Content-Length") or 0)
+                if tamanho < 0:
+                    raise ValueError
+            except ValueError:
+                self.close_connection = True
+                self._json(400, {"erro": "tamanho inválido"})
+                return None
+            if tamanho > limite:
+                self.close_connection = True
+                self._json(413, {"erro": "conteúdo longo demais"})
+                return None
+            return tamanho
+
+        def _enfileirar(self, pedido):
+            try:
+                hud.enfileirar(pedido)
+            except queue.Full:
+                if pedido.get("arquivo"):
+                    Path(pedido["arquivo"]).unlink(missing_ok=True)
+                return self._json(503, {"erro": "fila cheia; tente novamente em instantes"})
+            return self._json(202, {"recebido": True})
+
         # ----------------------------------------------------------- rotas
         def do_GET(self):
             caminho = urlparse(self.path).path
@@ -212,34 +236,38 @@ def _construir(hud: ServidorHUD):
                 return self._escuta()
             if caminho != "/mensagem":
                 return self._json(404, {"erro": "rota desconhecida"})
-            tamanho = int(self.headers.get("Content-Length") or 0)
-            if tamanho > LIMITE_DE_MENSAGEM:
-                return self._json(413, {"erro": "mensagem longa demais"})
+            tamanho = self._tamanho(LIMITE_DE_MENSAGEM)
+            if tamanho is None:
+                return
             try:
                 dados = json.loads(self.rfile.read(tamanho) or b"{}")
-                texto = str(dados.get("texto", "")).strip()
+                if not isinstance(dados, dict) or not isinstance(dados.get("texto", ""), str):
+                    raise ValueError
+                texto = dados.get("texto", "").strip()
             except (ValueError, UnicodeDecodeError):
                 return self._json(400, {"erro": "corpo inválido"})
             if not texto:
                 return self._json(400, {"erro": "mensagem vazia"})
-            hud.enfileirar({"tipo": "texto", "texto": texto[:LIMITE_DE_MENSAGEM]})
-            return self._json(202, {"recebido": True})
+            return self._enfileirar({"tipo": "texto", "texto": texto[:LIMITE_DE_MENSAGEM]})
 
         def _escuta(self):
             if hud.pasta_de_escuta is None:
                 return self._json(503, {"erro": "escuta desligada"})
-            tamanho = int(self.headers.get("Content-Length") or 0)
+            tamanho = self._tamanho(LIMITE_DE_AUDIO)
+            if tamanho is None:
+                return
             if tamanho <= 0:
                 return self._json(400, {"erro": "áudio vazio"})
-            if tamanho > LIMITE_DE_AUDIO:
-                return self._json(413, {"erro": "áudio longo demais"})
             arquivo = hud.pasta_de_escuta / f"{uuid.uuid4().hex}.webm"
-            arquivo.write_bytes(self.rfile.read(tamanho))
+            corpo = self.rfile.read(tamanho)
+            if len(corpo) != tamanho:
+                self.close_connection = True
+                return self._json(400, {"erro": "áudio incompleto"})
+            arquivo.write_bytes(corpo)
             arquivo.chmod(0o600)
             # A transcrição acontece no laço principal: o modelo de escuta é
             # um só e não deve ser usado por duas threads ao mesmo tempo.
-            hud.enfileirar({"tipo": "audio", "arquivo": str(arquivo)})
-            return self._json(202, {"recebido": True})
+            return self._enfileirar({"tipo": "audio", "arquivo": str(arquivo)})
 
         def _fluxo(self):
             fila = hud._assinar()

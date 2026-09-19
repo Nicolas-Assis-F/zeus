@@ -220,6 +220,8 @@ async function enviar(){
   const campo = $("texto");
   const texto = campo.value.trim();
   if (!texto) return;
+  pararAudio();
+  AGUARDANDO = true;
   campo.value = "";
   escrever("nicolas", texto);
   mudarEstado("pensando", "gerando resposta");
@@ -241,7 +243,10 @@ $("texto").addEventListener("keydown", (e) => {
 });
 
 /* ----------------------------------------------------------------- fala */
-let AUDIO = null;
+let AUDIO = null, ULTIMA_GERACAO = 0, AGUARDANDO = false;
+function pararAudio(){
+  if (AUDIO){ AUDIO.onended = null; AUDIO.pause(); AUDIO = null; }
+}
 function tocar(url){
   try{
     if (AUDIO) { AUDIO.pause(); }
@@ -268,8 +273,12 @@ function podeGravar(){
 
 async function alternarGravacao(){
   if (gravando){ pararGravacao(); return; }
+  let trilha = null;
   try{
-    const trilha = await navigator.mediaDevices.getUserMedia({audio:true});
+    pararAudio();
+    trilha = await navigator.mediaDevices.getUserMedia({audio:{
+      echoCancellation:true, noiseSuppression:true, autoGainControl:true, channelCount:1
+    }});
     gravador = new MediaRecorder(trilha, MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? {mimeType:"audio/webm;codecs=opus"} : {});
     pedacos = [];
@@ -281,6 +290,7 @@ async function alternarGravacao(){
       clearTimeout(limiteDeGravacao);
       const audio = new Blob(pedacos, {type: gravador.mimeType || "audio/webm"});
       if (audio.size < 1200){ mudarEstado("ocioso","áudio curto demais"); return; }
+      AGUARDANDO = true;
       mudarEstado("ouvindo","enviando para transcrever");
       try{
         const r = await fetch("/escuta?chave=" + encodeURIComponent(CHAVE), {
@@ -297,6 +307,7 @@ async function alternarGravacao(){
     mudarEstado("ouvindo","gravando — clique para parar");
     limiteDeGravacao = setTimeout(pararGravacao, 60000);
   }catch(e){
+    if (trilha) trilha.getTracks().forEach((t) => t.stop());
     escrever("sistema","O navegador não liberou o microfone. Em rede local isso costuma ser origem insegura: abra a interface por https.");
     mudarEstado("ocioso","—");
   }
@@ -389,15 +400,26 @@ function abrirFluxo(){
       if (pacote.reiniciar) descartarFluxo(); else fluir(pacote.pedaco || "");
       if (ESTADO !== "pensando") mudarEstado("pensando","escrevendo");
     }
+    else if (pacote.tipo === "audio"){
+      if (!AGUARDANDO && !gravando && pacote.geracao === ULTIMA_GERACAO) tocar(pacote.audio);
+    }
     else if (pacote.tipo === "mensagem"){
       const classe = pacote.de === "zeus" ? "zeus" : (pacote.de === "sistema" ? "sistema" : "nicolas");
       if (classe !== "zeus" || !fecharFluxo(pacote.texto, pacote.hora)){
         if (classe === "zeus") descartarFluxo();
         escrever(classe, pacote.texto, pacote.hora);
       }
+      if (classe === "zeus" || classe === "sistema") AGUARDANDO = false;
       if (pacote.audio) tocar(pacote.audio); else mudarEstado("ocioso","—");
     }
-    else if (pacote.tipo === "situacao"){ mudarEstado(pacote.estado, pacote.detalhe); }
+    else if (pacote.tipo === "situacao"){
+      if (pacote.geracao !== undefined){
+        ULTIMA_GERACAO = pacote.geracao;
+        AGUARDANDO = true;
+        pararAudio();
+      }
+      mudarEstado(pacote.estado, pacote.detalhe);
+    }
   };
 }
 

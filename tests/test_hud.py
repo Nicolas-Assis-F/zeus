@@ -1,6 +1,9 @@
 """A HUD é a porta do Zeus na rede de casa: rota errada e chave frouxa importam."""
 
 import json
+import queue
+import tempfile
+from pathlib import Path
 import threading
 import unittest
 import urllib.error
@@ -53,6 +56,21 @@ class Servidor(unittest.TestCase):
         self.assertEqual(self.pedir("/mensagem", corpo_bruto=b"nao e json")[0], 400)
         self.assertEqual(self.pedir("/mensagem", {"texto": "x" * 5000})[0], 413)
         self.assertEqual(self.recebidas, [{"tipo": "texto", "texto": "bom dia"}])
+
+    def test_corpo_sem_objeto_ou_texto_nao_string_e_recusado(self):
+        for corpo in (b'[]', b'null', b'{"texto":42}'):
+            self.assertEqual(self.pedir("/mensagem", corpo_bruto=corpo)[0], 400)
+        self.assertFalse(self.recebidas)
+
+    def test_fila_cheia_devolve_503_sem_manter_gravacao(self):
+        def cheia(_):
+            raise queue.Full
+        self.hud.enfileirar = cheia
+        self.assertEqual(self.pedir("/mensagem", {"texto": "oi"})[0], 503)
+        with tempfile.TemporaryDirectory() as pasta:
+            self.hud.pasta_de_escuta = Path(pasta)
+            self.assertEqual(self.pedir("/escuta", corpo_bruto=b'audio')[0], 503)
+            self.assertEqual(list(Path(pasta).iterdir()), [])
 
     def test_rotas_desconhecidas_e_audio_inexistente(self):
         self.assertEqual(self.pedir("/qualquer")[0], 404)

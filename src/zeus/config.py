@@ -37,6 +37,10 @@ class Config:
     escuta_modelo: str = "small"
     escuta_computo: str = "int8"
     escuta_idioma: str = "pt"
+    escuta_threads: int = 4
+    escuta_beam: int = 1
+    escuta_silencio_ms: int = 500
+    escuta_vocabulario: str = ""
     temperatura_conversa: float = 0.75
     temperatura_decisao: float = 0.0
     turnos_de_conversa: int = 12
