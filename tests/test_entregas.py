@@ -158,6 +158,15 @@ class FilaDuravel(unittest.TestCase):
         self.assertEqual(erros, [])
         self.assertEqual(self.canal.enviados, ['água'])
 
+    def test_pendencia_antiga_nao_some_da_lista_com_novas_entregas(self):
+        self.agendar()
+        with self.store.connection:
+            self.store.connection.execute("UPDATE saidas SET situacao='incerta'")
+        self.agora += timedelta(days=1)
+        for i in range(30):
+            self.fila.preparar('recente:' + str(i), 'memoria', 'aviso', agora=self.agora)
+        self.assertEqual(self.fila.listar(20)[0]['chave'], 'lembrete:1')
+
 
 class Operacao(unittest.TestCase):
     def test_backup_consistente_inclui_wal_e_nao_sobrescreve(self):

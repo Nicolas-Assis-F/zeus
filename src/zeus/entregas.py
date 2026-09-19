@@ -17,7 +17,9 @@ class Entregas:
 
     def listar(self, limite=50):
         return [dict(r) for r in self.db.execute(
-            "SELECT * FROM saidas ORDER BY atualizada_em DESC, chave LIMIT ?", (limite,))]
+            "SELECT * FROM saidas ORDER BY "
+            "CASE WHEN situacao IN ('incerta','falhou','expirada') THEN 0 ELSE 1 END, "
+            "atualizada_em DESC, chave LIMIT ?", (limite,))]
 
     def preparar(self, chave, canal, texto, tipo='aviso', referencia=None,
                  agora=None, expira=None):
@@ -127,6 +129,7 @@ class Entregas:
     def resolver(self, chave, acao, agora=None):
         agora = agora or agora_utc()
         with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
             linha = self.db.execute("SELECT * FROM saidas WHERE chave=?", (chave,)).fetchone()
             if not linha or linha['situacao'] not in ('incerta', 'falhou', 'expirada'):
                 raise ValueError('Somente saída incerta, falha ou expirada pode ser resolvida.')
