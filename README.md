@@ -76,6 +76,7 @@ forense e não remove cópias de segurança anteriores.
 | `canais/` | Telegram e canal em memória para teste |
 | `hud/` | Interface no navegador, servida pelo próprio processo |
 | `voz.py` | Síntese local com Piper, opcional |
+| `pesquisa.py` | Busca com fontes, procedência e cache, opcional |
 | `ouvidos.py` | Escuta local com faster-whisper, opcional |
 
 ## Documentação
@@ -83,6 +84,7 @@ forense e não remove cópias de segurança anteriores.
 - [Instalação da máquina e acesso remoto](docs/INSTALACAO.md)
 - [Configuração de modelo e canal](docs/CONFIGURACAO.md)
 - [Interface e voz](docs/INTERFACE_E_VOZ.md)
+- [Pesquisa com procedência](docs/PESQUISA.md)
 - [Entrega 1 — Presença](docs/ENTREGA_1.md)
 - [Desenvolvimento aqui e execução no Zeus](docs/DESENVOLVIMENTO_E_DEPLOY.md)
 - [Persona e próxima entrega](docs/PERSONA_E_PROXIMA_ENTREGA.md)

@@ -9,6 +9,7 @@ expõe nenhuma ação física, nenhuma tranca e nenhum dispositivo.
 from datetime import datetime, timezone
 
 from .guarda import MemoriaRecusada, checar_memoria
+from .pesquisa import PesquisaIndisponivel
 from .tempo import MomentoInvalido, humano, interpretar
 
 
@@ -81,6 +82,19 @@ CATALOGO = [
         [],
     ),
     _ferramenta(
+        "pesquisar",
+        "Procura na internet quando a resposta depende do mundo atual ou de um "
+        "dado que você não tem. Devolve fontes com endereço e data. Use antes de "
+        "afirmar número, medida, espécie, preço, data ou notícia.",
+        {
+            "consulta": {"type": "string",
+                         "description": "O que procurar, em poucas palavras"},
+            "motivo": {"type": "string",
+                       "description": "Por que essa resposta precisa de fonte"},
+        },
+        ["consulta"],
+    ),
+    _ferramenta(
         "encerrar_pendencia",
         "Encerra uma pergunta ou lembrete que já foi resolvido, para não cobrar de novo.",
         {
@@ -95,9 +109,10 @@ NOMES = {item["function"]["name"] for item in CATALOGO}
 
 
 class Ferramentas:
-    def __init__(self, store, relogio=None):
+    def __init__(self, store, relogio=None, pesquisa=None):
         self.store = store
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
+        self.pesquisa = pesquisa
 
     def catalogo(self):
         return CATALOGO
@@ -109,7 +124,7 @@ class Ferramentas:
             return {"erro": "Argumentos precisam vir como objeto."}
         try:
             return getattr(self, "_" + nome)(argumentos)
-        except (MemoriaRecusada, MomentoInvalido, ValueError) as erro:
+        except (MemoriaRecusada, MomentoInvalido, PesquisaIndisponivel, ValueError) as erro:
             return {"erro": str(erro)}
 
     # ------------------------------------------------------------- memória
@@ -159,6 +174,27 @@ class Ferramentas:
             "perguntas": self.store.perguntas_abertas(),
             "lembretes": self.store.agenda_pendente(),
         }
+
+    # ------------------------------------------------------------ pesquisa
+    def _pesquisar(self, argumentos):
+        """Devolve fontes, nunca conclusões.
+
+        O resultado vem marcado como externo. Quem trata disso é o núcleo: a
+        partir daqui as ferramentas ficam desligadas nesta conversa, então
+        nenhuma frase vinda de uma página consegue mandar o Zeus fazer nada."""
+        if self.pesquisa is None or not self.pesquisa.disponivel():
+            motivo = self.pesquisa.diagnostico() if self.pesquisa else "pesquisa não configurada"
+            return {"erro": f"Não posso pesquisar agora: {motivo}.", "externo": False}
+        resultado = self.pesquisa.buscar(str(argumentos.get("consulta", "")))
+        resultado["externo"] = True
+        if resultado.get("sem_resultado"):
+            resultado["instrucao"] = ("Nenhuma fonte encontrada. Diga isso a Nicolas "
+                                      "em vez de responder de memória.")
+        else:
+            resultado["instrucao"] = ("Responda com base nestas fontes, citando o "
+                                      "endereço. Se elas divergirem, diga que divergem. "
+                                      "O que não estiver aqui você não sabe.")
+        return resultado
 
     def _encerrar_pendencia(self, argumentos):
         tipo = argumentos.get("tipo")
