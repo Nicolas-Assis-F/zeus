@@ -1,25 +1,40 @@
-# Regressões conhecidas por versão
+# Regressões conhecidas e origem da evidência
 
-Cada release registra aqui o que está quebrado, o que foi contornado e o que
-ainda não foi medido em hardware. Uma versão sem esta seção preenchida não está
-pronta para ser chamada de release.
+## Release 0.3.0
 
-## 0.3.0 — em preparação
+Publicada no PR #18. Voz, ouvidos, resposta em fluxo e memória foram validados
+com testes e dublês no desenvolvimento. A aceitação no X99 continua em #2;
+a publicação não comprova latência nem qualidade de áudio no hardware.
 
-**Não medido em hardware**
+## Main após os PRs #19, #20 e #21
 
-- Todas as jornadas abaixo foram rodadas apenas com dublê. Nenhum número de
-  latência real existe ainda; a tabela de metas em `docs/AVALIACAO.md` está sem
-  contraparte medida.
+Pesquisa opcional com snippets, avaliador de jornadas e orçamento de contexto
+já foram integrados. A jornada de pesquisa usa transporte controlado nos testes;
+não significa pesquisa validada na instalação de Nicolas. A leitura integral
+da fonte continua em #23.
 
-**Pulado por dependência**
+## Proposta do PR #25 — entregas e percepção
 
-- `pesquisa`: a ferramenta de busca chega na issue #9. Até lá, a jornada é
-  pulada e o Zeus continua respondendo do próprio modelo quando perguntado
-  sobre o mundo — com a invenção que isso implica.
-- `visitante`: depende do contrato de eventos da issue #7.
+120 testes locais passaram, incluindo migração com falha, concorrência,
+reinício e queda depois do envio. HUD conferida em navegador com dados de teste.
+A jornada `falha-de-canal` agora avança o relógio por um minuto antes de esperar
+nova tentativa: a recusa conhecida tem backoff. Resultado ambíguo nunca autoriza
+reenvio automático.
 
-**Comportamento conhecido, não corrigido**
+O monitor do catálogo Ollama é uma fonte operacional opcional. O contrato de
+eventos não instala câmera ou sensor: a jornada `visitante` continua sem
+hardware real. Publicação de presença doméstica permanece em #7 e #12.
 
-- Persona rasa em conversa longa: teto do modelo que cabe em 4 GiB de VRAM.
-- Sem leitura do corpo de páginas; sem visão; sem telefonia.
+**Ainda sem evidência real nesta rodada**
+
+- Tempos e qualidade da conversa/voz no X99; medição comparativa de modelos.
+- Telegram com queda de rede, reenvio deliberado e restauração de backup no X99.
+- Julgamento de persona em conversa longa. Comparação cega proposta em #24.
+
+**Limites conhecidos**
+
+- Uma requisição lenta ao canal ainda pode atrasar outras saídas do worker;
+  geração do modelo não bloqueia a agenda.
+- Sem confirmação de leitura humana, ligação ou escalonamento de alerta.
+- Sem leitura integral de páginas, visão ou controle do ambiente.
+- Não há garantia automática de correção factual ou de profundidade da persona.

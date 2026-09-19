@@ -103,3 +103,14 @@ Três testes automatizados passaram nesta máquina: persistência e correção a
 - 69 testes locais passaram, sem serviços externos; há testes HTTP em loopback. HUD conferida em navegador real com dados de teste, sem erros no console.
 - Criados plano de evolução, 17 issues (quadro central e 16 tarefas), critérios de aceitação e divisão proposta entre Codex e Claude.
 - CI e validação de deploy preparadas. Ganho de velocidade, áudio real e ativação no X99 continuam exigindo evidência de hardware.
+
+
+## 19 de setembro de 2026 — entregas recuperáveis e percepção operacional (Codex)
+
+- Branch isolada `codex/presenca-confiavel-20260919`, sem mudar a árvore compartilhada.
+- Entrada Telegram persistida antes do avanço do offset; resposta pronta entra na fila sem depender de envio imediato.
+- Saídas com estados, tentativas limitadas e decisão explícita nos resultados incertos. Interrupção durante ferramenta não reprocessa a entrada sozinha.
+- Agenda em worker com conexão SQLite própria, independente da geração; trava impede duas instâncias `run` no mesmo estado.
+- Backup consistente antes da migração 3 e sob comando; migrações passam a aplicar tabelas e versão na mesma transação.
+- Eventos com origem, validade e deduplicação; monitor optativo do catálogo Ollama, sem câmera ou sensor fictício.
+- HUD mostra pendências de entrega e estado operacional. Evidência de teste é sintética/local; aceitação no X99 continua nas issues #2, #3, #7 e #16.

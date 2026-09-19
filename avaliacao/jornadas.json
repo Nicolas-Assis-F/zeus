@@ -70,7 +70,7 @@
           "espera": {"usou": ["agendar_lembrete"]}
         },
         {"canal_fora": true, "avancar": "+11m", "espera": {"entregas": 0}},
-        {"canal_fora": false, "espera": {"entregas": 1, "contem": ["água"]}},
+        {"canal_fora": false, "avancar": "+1m", "espera": {"entregas": 1, "contem": ["água"]}},
         {"espera": {"entregas": 0}}
       ]
     },

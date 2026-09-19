@@ -29,5 +29,9 @@
   "temperatura_decisao": 0.0,
   "turnos_de_conversa": 12,
   "teto_de_contexto": 600,
-  "intervalo_agenda": 30
+  "intervalo_agenda": 30,
+  "atraso_maximo_lembrete": 86400,
+  "monitorar_modelo": false,
+  "intervalo_monitor": 30,
+  "intervalo_recuperacao_modelo": 30
 }

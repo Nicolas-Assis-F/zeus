@@ -1,6 +1,9 @@
 """Canal em memória: usado em teste e no modo CLI, nunca em produção."""
 
 
+from ..entregas import NaoEnviado
+
+
 class CanalMemoria:
     nome = "memoria"
 
@@ -11,7 +14,7 @@ class CanalMemoria:
 
     def enviar(self, texto: str):
         if self.falhar:
-            raise RuntimeError("canal indisponível")
+            raise NaoEnviado("canal indisponível")
         self.enviados.append(texto)
 
     def digitando(self):

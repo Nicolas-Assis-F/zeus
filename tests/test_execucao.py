@@ -166,7 +166,9 @@ class CicloIntegrado(unittest.TestCase):
                     if tipo == 'mensagem' and campos.get('de') == 'zeus':
                         ordem.append('texto')
                         final.set()
-                def atualizar(self, *_):
+                def estado(self):
+                    return {}
+                def atualizar(self, *_, **__):
                     pass
                 def parar(self):
                     pass

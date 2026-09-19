@@ -51,6 +51,10 @@ class Config:
     turnos_de_conversa: int = 12
     teto_de_contexto: int = 600
     intervalo_agenda: int = 30
+    atraso_maximo_lembrete: int = 86400
+    monitorar_modelo: bool = False
+    intervalo_monitor: int = 30
+    intervalo_recuperacao_modelo: int = 30
     espera_telegram: int = 25
     # Preenchido por carregar(): dizer de onde a configuração veio evita a
     # confusão de editar um arquivo que o programa nunca lê.
