@@ -1,0 +1,142 @@
+{
+  "versao": 1,
+  "sobre": "Jornadas de avaliação do Zeus. Dado, não código: edite à vontade. Cada passo tem o que Nicolas diz, o que o dublê responde (ignorado no modo real) e o que se espera do sistema.",
+  "jornadas": [
+    {
+      "id": "academia",
+      "titulo": "Combinado de treino cumprido, sem cobrar duas vezes",
+      "dimensoes": ["utilidade", "continuidade", "interrupcoes"],
+      "passos": [
+        {
+          "nicolas": "vou treinar mais tarde",
+          "modelo": [
+            {"ferramenta": "agendar_pergunta",
+             "argumentos": {"texto": "Antes do treino: quer que eu lembre da creatina?",
+                            "motivo": "esse lembrete ainda não está combinado",
+                            "quando": "+30m"}},
+            {"texto": "Bom treino, senhor. Volto a falar daqui a pouco."}
+          ],
+          "espera": {"usou": ["agendar_pergunta"], "entregas": 0}
+        },
+        {"avancar": "+31m", "espera": {"entregas": 1, "contem": ["creatina"]}},
+        {"reiniciar": true, "espera": {"entregas": 0}},
+        {
+          "nicolas": "pode lembrar sim",
+          "modelo": [
+            {"ferramenta": "agendar_lembrete",
+             "argumentos": {"texto": "creatina antes do treino", "quando": "+2h"}},
+            {"texto": "Combinado. Falo com você na hora."}
+          ],
+          "espera": {"usou": ["agendar_lembrete"], "pergunta_respondida": true}
+        },
+        {"avancar": "+3h", "espera": {"entregas": 1, "contem": ["creatina"]}},
+        {"espera": {"entregas": 0}}
+      ]
+    },
+    {
+      "id": "projeto-longo",
+      "titulo": "Assunto de projeto atravessa reinício do processo",
+      "dimensoes": ["continuidade", "utilidade"],
+      "passos": [
+        {
+          "nicolas": "estou montando o satélite de voz do Zeus",
+          "modelo": [
+            {"ferramenta": "lembrar_fato",
+             "argumentos": {"chave": "projeto_atual", "valor": "satélite de voz"}},
+            {"texto": "Anotado. Vou acompanhar esse assunto."}
+          ],
+          "espera": {"usou": ["lembrar_fato"], "lembra": {"projeto_atual": "satélite"}}
+        },
+        {"reiniciar": true},
+        {
+          "nicolas": "em que eu estava mesmo?",
+          "modelo": [{"texto": "No satélite de voz, senhor."}],
+          "espera": {"lembra": {"projeto_atual": "satélite"}, "contem": ["satélite"]}
+        }
+      ]
+    },
+    {
+      "id": "falha-de-canal",
+      "titulo": "Combinado sobrevive ao canal fora do ar",
+      "dimensoes": ["recuperacao", "utilidade"],
+      "passos": [
+        {
+          "nicolas": "me lembra de beber água daqui 10 minutos",
+          "modelo": [
+            {"ferramenta": "agendar_lembrete",
+             "argumentos": {"texto": "beber água", "quando": "+10m"}},
+            {"texto": "Marcado."}
+          ],
+          "espera": {"usou": ["agendar_lembrete"]}
+        },
+        {"canal_fora": true, "avancar": "+11m", "espera": {"entregas": 0}},
+        {"canal_fora": false, "espera": {"entregas": 1, "contem": ["água"]}},
+        {"espera": {"entregas": 0}}
+      ]
+    },
+    {
+      "id": "pesquisa",
+      "titulo": "Pergunta sobre o mundo é respondida com fonte, não de memória",
+      "dimensoes": ["factualidade", "escolha-de-ferramenta"],
+      "requer_ferramentas": ["pesquisar"],
+      "vale_em": "real",
+      "passos": [
+        {
+          "nicolas": "qual animal tem a mordida mais forte?",
+          "modelo": [
+            {"ferramenta": "pesquisar",
+             "argumentos": {"consulta": "animal com a mordida mais forte"}},
+            {"texto": "Segundo as fontes que encontrei, o crocodilo-de-água-salgada lidera as medições."}
+          ],
+          "espera": {"usou": ["pesquisar"]}
+        }
+      ]
+    },
+    {
+      "id": "capacidade-ausente",
+      "titulo": "Não afirma ver o que não vê",
+      "dimensoes": ["incerteza", "tom"],
+      "vale_em": "real",
+      "passos": [
+        {
+          "nicolas": "você está vendo a sala agora?",
+          "modelo": [{"texto": "Não estou. Câmera é capacidade que ainda não tenho."}],
+          "espera": {"nao_usou": ["consultar_fato"],
+                     "nao_contem": ["estou vendo a sala", "consigo ver"]}
+        }
+      ]
+    },
+    {
+      "id": "correcao",
+      "titulo": "Correção substitui a informação ativa",
+      "dimensoes": ["memoria", "continuidade"],
+      "passos": [
+        {
+          "nicolas": "meu treino é de manhã",
+          "modelo": [
+            {"ferramenta": "lembrar_fato",
+             "argumentos": {"chave": "treino", "valor": "de manhã"}},
+            {"texto": "Anotado."}
+          ],
+          "espera": {"lembra": {"treino": "manhã"}}
+        },
+        {
+          "nicolas": "na verdade mudei, treino à noite agora",
+          "modelo": [
+            {"ferramenta": "lembrar_fato",
+             "argumentos": {"chave": "treino", "valor": "à noite"}},
+            {"texto": "Corrigido."}
+          ],
+          "espera": {"lembra": {"treino": "noite"}, "nao_contem": ["de manhã"]}
+        }
+      ]
+    },
+    {
+      "id": "visitante",
+      "titulo": "Pessoa na entrada enquanto Nicolas está fora",
+      "dimensoes": ["iniciativa", "interrupcoes"],
+      "status": "pendente",
+      "motivo": "depende do contrato de eventos da issue #7, em execução pelo Codex"
+    }
+  ]
+}

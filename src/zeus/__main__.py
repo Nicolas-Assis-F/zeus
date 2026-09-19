@@ -135,6 +135,14 @@ def main():
     commands.add_parser("run", help="Manter o Zeus em execução")
     commands.add_parser("agenda", help="Listar perguntas e lembretes pendentes")
 
+    avaliacao_cmd = commands.add_parser(
+        "avaliar", help="Rodar as jornadas de avaliação e dizer a origem da evidência")
+    avaliacao_cmd.add_argument("--jornadas", default=None)
+    avaliacao_cmd.add_argument("--real", action="store_true",
+                               help="Falar com o modelo instalado em vez do dublê")
+    avaliacao_cmd.add_argument("--relatorio", default=None,
+                               help="Onde gravar o relatório em JSON")
+
     medicao = commands.add_parser("medir", help="Comparar modelos com números, não com palpite")
     medicao.add_argument("--modelos", default="",
                          help="Lista separada por vírgula; sem isso, mede o configurado")
@@ -227,6 +235,8 @@ def main():
         elif args.command == "evento":
             episodio = zeus.perceber(args.tipo, args.resumo, simulado=args.simulado)
             emit("episodio_aberto", id=episodio, simulado=args.simulado)
+        elif args.command == "avaliar":
+            return avaliar(config, args)
         elif args.command == "medir":
             return medir(config, zeus, args)
         elif args.command == "conversar":
@@ -243,6 +253,33 @@ def main():
         return 2
     finally:
         store.close()
+
+
+def avaliar(config, args):
+    """Roda as jornadas e diz, em toda linha, de onde veio a evidência."""
+    import tempfile
+
+    from .avaliacao import Avaliacao, carregar_jornadas, em_texto
+
+    jornadas = carregar_jornadas(args.jornadas)
+    provedor, origem = None, "simulada"
+    if args.real:
+        provedor = criar_provedor(config)
+        provedor.verificar()
+        origem = "hardware"
+
+    with tempfile.TemporaryDirectory() as temporario:
+        avaliacao = Avaliacao(config, temporario, provedor=provedor, origem=origem,
+                              pesquisa=montar_pesquisa(config, temporario)
+                              if "montar_pesquisa" in globals() else None)
+        relatorio = avaliacao.rodar(jornadas)
+
+    print(em_texto(relatorio))
+    if args.relatorio:
+        Path(args.relatorio).write_text(
+            json.dumps(relatorio, ensure_ascii=False, indent=1), encoding="utf-8")
+        emit("relatorio_gravado", arquivo=args.relatorio)
+    return 1 if relatorio["resumo"]["falhou"] else 0
 
 
 PROVA_DE_CONVERSA = "Me conta em duas frases o que você faz por mim."
