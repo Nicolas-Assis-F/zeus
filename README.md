@@ -43,6 +43,7 @@ Com modelo e canal configurados (veja `docs/CONFIGURACAO.md`):
 ./zeus check --modelo --canal
 ./zeus conversar "vou treinar mais tarde"
 ./zeus agenda
+./zeus avaliar
 ./zeus medir --modelos llama3.1:8b-instruct-q4_K_M,qwen2.5:7b-instruct
 ```
 
@@ -85,6 +86,7 @@ forense e não remove cópias de segurança anteriores.
 - [Configuração de modelo e canal](docs/CONFIGURACAO.md)
 - [Interface e voz](docs/INTERFACE_E_VOZ.md)
 - [Pesquisa com procedência](docs/PESQUISA.md)
+- [Avaliação por jornadas](docs/AVALIACAO.md)
 - [Entrega 1 — Presença](docs/ENTREGA_1.md)
 - [Desenvolvimento aqui e execução no Zeus](docs/DESENVOLVIMENTO_E_DEPLOY.md)
 - [Persona e próxima entrega](docs/PERSONA_E_PROXIMA_ENTREGA.md)
