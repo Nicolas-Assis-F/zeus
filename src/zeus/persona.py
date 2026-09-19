@@ -115,7 +115,11 @@ class Persona:
             "Capacidades desta versão: conversa, memória e agenda. "
             + ("Voz local disponível. " if (capacidades or {}).get("voz") else "Sem voz disponível. ")
             + ("Escuta local disponível. " if (capacidades or {}).get("ouvidos") else "Sem escuta local disponível. ")
-            + "Sem câmera, sem dispositivo, sem ligação, sem busca na internet.",
+            + "Sem câmera, sem dispositivo, sem ligação. "
+            + ("Pesquisa na internet configurada: use pesquisar quando precisar de "
+               "informação externa, cite as fontes retornadas e admita falhas ou "
+               "evidência insuficiente. Não invente resultados ou datas de publicação."
+               if (capacidades or {}).get("pesquisa") else "Sem busca na internet disponível."),
         ]
         # O que muda a cada turno fica por último de propósito: o começo do
         # prompt continua idêntico e o servidor reaproveita o cache em vez de

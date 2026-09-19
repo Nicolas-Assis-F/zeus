@@ -5,8 +5,8 @@ de mordida que ninguém mediu. Um modelo local pequeno preenche lacuna com o que
 soa plausível, e nenhum ajuste de prompt corrige isso: falta fonte.
 
 Este módulo entrega fonte. Cada resultado carrega título, endereço, domínio,
-trecho, data de publicação quando a página informa, e a data da consulta. O que
-não veio de lugar nenhum não vira resposta.
+trecho, data de publicação quando o buscador fornece metadado explícito, e a
+data da consulta. O modelo é orientado a usar essa evidência e admitir lacunas.
 
 Duas regras de segurança moram aqui, e nenhuma depende do modelo se comportar:
 
@@ -41,7 +41,6 @@ RESULTADO_DDG = re.compile(
     r'.*?class="result__snippet"[^>]*>(?P<trecho>.*?)</a>',
     re.DOTALL | re.IGNORECASE,
 )
-DATA_NA_PAGINA = re.compile(r"\b(20\d{2}|19\d{2})-(\d{2})-(\d{2})\b")
 
 # Frases que tentam virar comando. Não bloqueiam nada sozinhas — o núcleo é que
 # desliga as ferramentas. Servem para marcar o trecho e avisar Nicolas.
@@ -113,7 +112,7 @@ def transporte_web(url: str, cabecalhos=None, timeout: int = 10) -> str:
 @dataclass
 class Pesquisa:
     provedor: str = "nenhum"
-    url_base: str = "https://html.duckduckgo.com/html/"
+    url_base: str = ""
     timeout: int = 10
     cache_minutos: int = 30
     maximo_de_fontes: int = 4
@@ -123,6 +122,9 @@ class Pesquisa:
     _cache: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
+        self.url_base = self.url_base.strip()
+        if self.provedor == "duckduckgo" and not self.url_base:
+            self.url_base = "https://html.duckduckgo.com/html/"
         self.transporte = self.transporte or transporte_web
         self.relogio = self.relogio or (lambda: datetime.now(timezone.utc))
         if self.destino:
@@ -131,14 +133,29 @@ class Pesquisa:
 
     # ------------------------------------------------------------ situação
     def disponivel(self) -> bool:
-        return self.provedor in ("duckduckgo", "searxng")
+        return self.provedor in ("duckduckgo", "searxng") and self._url_valida()
 
     def diagnostico(self) -> str:
         if self.provedor == "nenhum":
             return ("desligada (defina pesquisa_provedor como duckduckgo ou searxng)")
         if self.provedor == "searxng" and not self.url_base:
             return "searxng escolhido sem pesquisa_url"
-        return f"pronta via {self.provedor}"
+        if self.provedor not in ("duckduckgo", "searxng"):
+            return "pesquisa_provedor desconhecido"
+        if not self._url_valida():
+            return "pesquisa_url inválida: use endereço HTTP(S) sem credenciais, consulta ou fragmento"
+        return f"configurada via {self.provedor}; conexão ainda não verificada"
+
+    def _url_valida(self):
+        try:
+            partes = urllib.parse.urlsplit(self.url_base)
+            partes.port  # valida porta sem fazer conexão
+            return bool(partes.scheme in ("http", "https") and partes.hostname
+                        and not any(c.isspace() for c in self.url_base)
+                        and not partes.username and not partes.password
+                        and not partes.query and not partes.fragment)
+        except ValueError:
+            return False
 
     # ------------------------------------------------------------- consulta
     def buscar(self, consulta: str) -> dict:
@@ -188,8 +205,7 @@ class Pesquisa:
             if not url.startswith("http") or not titulo:
                 continue
             fontes.append(Fonte(titulo=titulo, url=url, trecho=trecho,
-                                consultado_em=agora,
-                                publicado_em=self._data_no_texto(trecho)))
+                                consultado_em=agora))
         return fontes
 
     def _ler_searxng(self, pagina: str, agora: str):
@@ -203,16 +219,21 @@ class Pesquisa:
             titulo = _texto_limpo(str(bruto.get("title", "")), 200)
             if not url.startswith("http") or not titulo:
                 continue
-            publicado = str(bruto.get("publishedDate") or "")[:10]
+            publicado = self._data_publicada(bruto.get("publishedDate"))
             fontes.append(Fonte(titulo=titulo, url=url,
                                 trecho=_texto_limpo(str(bruto.get("content", ""))),
                                 consultado_em=agora, publicado_em=publicado))
         return fontes
 
     @staticmethod
-    def _data_no_texto(trecho: str) -> str:
-        achado = DATA_NA_PAGINA.search(trecho or "")
-        return achado.group(0) if achado else ""
+    def _data_publicada(valor) -> str:
+        # O metadado tem significado de publicação; uma data no snippet não tem.
+        if not isinstance(valor, str) or not re.match(r"^\d{4}-\d{2}-\d{2}(?:$|T| )", valor):
+            return ""
+        try:
+            return datetime.fromisoformat(valor.replace("Z", "+00:00")).date().isoformat()
+        except ValueError:
+            return ""
 
     # ---------------------------------------------------------------- cache
     def _do_cache(self, consulta: str):

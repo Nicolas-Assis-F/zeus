@@ -4,6 +4,7 @@ Nenhum teste aqui fala com a rede: o transporte é um dublê que devolve página
 escritas à mão, inclusive uma maliciosa e uma desatualizada.
 """
 
+import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -67,7 +68,8 @@ class Contrato(unittest.TestCase):
         self.assertEqual(primeira["url"], "https://nationalgeographic.com/crocodilo")
         self.assertEqual(primeira["dominio"], "nationalgeographic.com")
         self.assertIn("16.460 newtons", primeira["trecho"])
-        self.assertEqual(primeira["publicado_em"], "2012-03-15")
+        # O snippet cita a data da medição, não a publicação do artigo.
+        self.assertNotIn("publicado_em", primeira)
         self.assertEqual(primeira["consultado_em"], "2026-09-19T21:00:00+00:00")
         self.assertEqual(resultado["consulta"], "mordida mais forte")
 
@@ -192,3 +194,63 @@ class PersonaCobraFonte(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CapacidadeEProcedencia(unittest.TestCase):
+    def test_searxng_sem_url_recusa_sem_fallback_ou_rede(self):
+        from zeus.__main__ import montar_pesquisa as montar_configurada
+        config = config_de_teste()
+        config.pesquisa_provedor = 'searxng'
+        with tempfile.TemporaryDirectory() as temp:
+            pesquisa = montar_configurada(config, temp)
+            pesquisa.transporte = transporte_fixo('{}')
+            self.assertEqual(pesquisa.url_base, '')
+            self.assertFalse(pesquisa.disponivel())
+            self.assertIn('sem pesquisa_url', pesquisa.diagnostico())
+            with self.assertRaises(PesquisaIndisponivel): pesquisa.buscar('teste')
+            self.assertEqual(pesquisa.transporte.chamadas, [])
+
+    def test_urls_invalidas_e_provedor_desconhecido_nao_fingem_capacidade(self):
+        for url in ('file:///etc/passwd', 'localhost:8080', 'https://',
+                    'http://servidor:xyz', 'http://[', 'https://a b',
+                    'https://usuario:segredo@exemplo.org', 'https://exemplo.org/?q=x'):
+            with self.subTest(url=url):
+                pesquisa = Pesquisa(provedor='searxng', url_base=url, transporte=transporte_fixo('{}'))
+                self.assertFalse(pesquisa.disponivel())
+                with self.assertRaises(PesquisaIndisponivel): pesquisa.buscar('teste')
+                self.assertEqual(pesquisa.transporte.chamadas, [])
+                self.assertNotIn('segredo', pesquisa.diagnostico())
+        pesquisa = Pesquisa(provedor='inexistente')
+        self.assertFalse(pesquisa.disponivel())
+        self.assertIn('desconhecido', pesquisa.diagnostico())
+
+    def test_searxng_valido_preserva_metadado_valido_e_data_de_consulta(self):
+        for valor, esperado in [('2026-09-18T12:30:00Z','2026-09-18'),
+                                ('2026-09-18','2026-09-18'), ('2026-02-30',''),
+                                ('2012-03-15 texto histórico',''), (None,''), (123,'')]:
+            with self.subTest(valor=valor):
+                pagina = json.dumps({'results':[{'url':'https://fonte.example/a','title':'Fonte',
+                    'publishedDate':valor, 'content':'Medição feita em 2012-03-15.'}]})
+                pesquisa = Pesquisa(provedor='searxng', url_base='http://localhost:8080',
+                                    transporte=transporte_fixo(pagina))
+                self.assertTrue(pesquisa.disponivel())
+                fonte = pesquisa.buscar('teste')['fontes'][0]
+                self.assertEqual(fonte.get('publicado_em',''), esperado)
+                self.assertIn('consultado_em', fonte)
+                self.assertIn('/search?q=teste&format=json', pesquisa.transporte.chamadas[0])
+
+    def test_capacidade_no_contexto_cli_antes_de_iniciar_run(self):
+        for pesquisa, habilitada in [(montar_pesquisa(PAGINA_DDG), True),
+                                     (Pesquisa(provedor='searxng'), False), (Pesquisa(),False)]:
+            with self.subTest(habilitada=habilitada), tempfile.TemporaryDirectory() as temp:
+                store = Store(Path(temp))
+                try:
+                    zeus = Zeus(store, ProvedorFalso([]), Persona.carregar('config/persona.md'),
+                                Ferramentas(store, pesquisa=pesquisa), config_de_teste())
+                    contexto = zeus._sistema('pesquise o assunto')
+                    self.assertEqual('Pesquisa na internet configurada' in contexto, habilitada)
+                    self.assertEqual('Sem busca na internet disponível' in contexto, not habilitada)
+                    if habilitada:
+                        self.assertIn('cite as fontes', contexto)
+                finally:
+                    store.close()

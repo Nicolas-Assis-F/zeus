@@ -13,8 +13,9 @@ A validação atual e as limitações estão em [Estado do projeto](docs/ESTADO_
 A evolução conjunta segue o [plano mestre](docs/PLANO_MESTRE_EVOLUCAO.md) e o
 [protocolo Codex e Claude](docs/TRABALHO_CONJUNTO.md).
 
-Ainda não existe visão, telefonia, controle de ambiente, pesquisa externa nem
-memória semântica. Há iniciativa baseada nos combinados e prazos registrados.
+A pesquisa externa é opcional e fornece snippets com fontes. Ainda não existe
+visão, telefonia, controle de ambiente nem memória semântica. Há iniciativa
+baseada nos combinados e prazos registrados.
 
 O desenvolvimento acontece no computador de Nicolas. O X99 é o destino de
 execução e recebe atualização por `git pull`.

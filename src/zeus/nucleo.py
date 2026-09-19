@@ -6,7 +6,7 @@ momento certo por um canal, resposta incorporada ao mesmo episódio e nenhum
 aviso duplicado depois de reinício.
 
 O que ainda não existe aqui está dito em voz alta: não há visão, telefonia,
-dispositivo doméstico nem pesquisa externa. O ciclo foi escrito para receber
+dispositivo doméstico. Pesquisa externa é opcional. O ciclo foi escrito para receber
 essas fontes sem ser reconstruído.
 """
 
@@ -45,7 +45,8 @@ class Zeus:
         self.ferramentas = ferramentas
         self.config = config
         self.canal = canal
-        self.capacidades = {}
+        self.capacidades = {"pesquisa": bool(ferramentas.pesquisa and
+                                              ferramentas.pesquisa.disponivel())}
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
 
     # ------------------------------------------------------------ contexto

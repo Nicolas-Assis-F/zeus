@@ -61,7 +61,7 @@ class TomDaConversa(unittest.TestCase):
         contexto = persona.sistema()
         self.assertIn("responda", contexto.lower())
         self.assertIn("opa", contexto.lower())
-        self.assertIn("sem busca na internet", contexto)
+        self.assertIn("sem busca na internet", contexto.lower())
 
 
 if __name__ == "__main__":

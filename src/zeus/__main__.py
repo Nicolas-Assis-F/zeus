@@ -79,8 +79,7 @@ def montar(args):
 
 def montar_pesquisa(config, estado):
     """Pesquisa é escolha explícita: sem provedor configurado, ela não existe."""
-    base = config.pesquisa_url or "https://html.duckduckgo.com/html/"
-    return Pesquisa(provedor=config.pesquisa_provedor, url_base=base,
+    return Pesquisa(provedor=config.pesquisa_provedor, url_base=config.pesquisa_url,
                     timeout=config.pesquisa_timeout,
                     cache_minutos=config.pesquisa_cache_minutos,
                     maximo_de_fontes=config.pesquisa_max_fontes,
@@ -235,7 +234,7 @@ def main():
         elif args.command == "persona":
             montado = zeus.persona.montar(
                 store.fatos(), store.perguntas_abertas(), store.agenda_pendente(),
-                datetime.now(timezone.utc), mensagem=args.mensagem,
+                datetime.now(timezone.utc), capacidades=zeus.capacidades, mensagem=args.mensagem,
                 teto=config.teto_de_contexto)
             print(montado["texto"])
             escolha = montado["escolha"]
