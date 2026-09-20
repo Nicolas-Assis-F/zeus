@@ -44,6 +44,8 @@ class Config:
     # sai procurando o que mais existe na máquina.
     # Mapa de localização. O centro padrão é Goiânia; troque para a sua casa e
     # o mapa abre já olhando para o lugar certo.
+    # Uma saudação por ligada da máquina, não por subida do processo.
+    saudacao_ao_ligar: bool = True
     mapa_ativo: bool = True
     mapa_centro_lat: float = -16.6869
     mapa_centro_lon: float = -49.2648

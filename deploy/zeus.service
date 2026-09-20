@@ -1,5 +1,9 @@
 [Unit]
 Description=Zeus base runtime
+# A conversa e a pesquisa precisam de rede. Subir antes dela só produz um
+# primeiro minuto de falha e um reinício que não era necessário.
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -8,6 +12,12 @@ Environment=PYTHONPATH=%h/zeus/src
 ExecStart=/usr/bin/python3 -m zeus run
 Restart=on-failure
 RestartSec=5
+# Teto de reinício. Sem isto a unidade girou 419 vezes em silêncio por causa
+# de um diretório errado: cada volta falhava, o systemd tentava de novo, e
+# nada no journal chamava atenção. Com o teto, ela para e fica em `failed`,
+# que é um estado que alguém percebe.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 TimeoutStopSec=15
 UMask=0077
 NoNewPrivileges=true

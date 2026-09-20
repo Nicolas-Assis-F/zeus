@@ -120,3 +120,54 @@ resultados na issue de validação no X99. A publicação no GitHub não prova d
 nem validação de hardware. Para retorno à versão anterior, usar a revisão anotada
 em uma checkout limpa e reiniciar conscientemente; nunca usar reset na cópia
 compartilhada com outro agente. Esta entrega não altera o esquema do banco.
+
+
+## Subir sozinho quando a máquina liga
+
+```bash
+bash deploy/instalar.sh
+```
+
+Um comando. Ele escreve a unidade apontando para a pasta onde o repositório
+realmente está, liga o *linger* da sessão, recarrega o systemd, limpa estado
+`failed` de tentativa anterior, sobe o serviço e roda o `check`.
+
+As três coisas que ele resolve já deram problema aqui:
+
+**A unidade apontava para o lugar errado.** `WorkingDirectory=%h/zeus` assume o
+clone em `~/zeus`. Com o clone em outro lugar, cada subida falhava e o systemd
+tentava de novo — 419 vezes, em silêncio. O script escreve o caminho real.
+
+**Serviço de usuário não sobe no boot sem *linger*.** Ele espera alguém fazer
+login. O X99 fica num canto sem monitor: ninguém vai logar nele.
+
+**Unidade em `failed` não volta sozinha**, nem depois de consertada. O
+`reset-failed` está no script.
+
+A unidade também ganhou teto de reinício (`StartLimitBurst=5` em
+`StartLimitIntervalSec=300`). Com o teto, um defeito de configuração para o
+serviço em `failed` — um estado que alguém percebe — em vez de girar para
+sempre sem nada no journal chamando atenção.
+
+### A saudação
+
+Quando a máquina liga e o Zeus termina de subir — canal, interface e agenda de
+pé — ele cumprimenta, pelo Telegram se estiver configurado, senão pela
+interface. Com voz disponível, ele fala.
+
+Uma vez por ligada da máquina, não por subida do processo. O freio é o
+`boot_id` do kernel, que muda quando a máquina liga e não muda quando um
+serviço reinicia; ele vai como chave na mesma tabela que já impede aviso
+duplicado. Sem esse freio, um serviço que reinicia cinco vezes seguidas daria
+cinco "bom dia" — a diferença entre presença e alarme.
+
+Se o modelo ainda não estiver de pé no primeiro segundo depois do boot, a
+saudação acontece do mesmo jeito, com uma frase honesta ("Bom dia, senhor.
+Estou de pé.") e a contagem de pendências. Máquina que liga sem dizer nada
+parece quebrada.
+
+A saudação nasce do Zeus: ela não passa pelo ciclo de conversa, porque isso
+registraria o pedido interno como se você tivesse digitado "a máquina acabou
+de ligar" e esse turno apareceria no seu histórico. Só a resposta é gravada.
+
+Para desligar: `"saudacao_ao_ligar": false`.

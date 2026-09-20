@@ -25,6 +25,7 @@
   "topo_p": 0.92,
   "topo_k": 40,
   "penalidade_de_repeticao": 1.15,
+  "saudacao_ao_ligar": true,
   "mapa_ativo": true,
   "mapa_centro_lat": -16.6869,
   "mapa_centro_lon": -49.2648,

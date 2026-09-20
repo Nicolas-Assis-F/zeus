@@ -150,6 +150,7 @@ class CicloIntegrado(unittest.TestCase):
             self.addCleanup(store.close)
             zeus.canal = None
             zeus.config.hud_tls = False
+            zeus.config.saudacao_ao_ligar = False   # a saudação tem teste próprio
             stopped = threading.Event()
             final = threading.Event()
             ordem = []

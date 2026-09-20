@@ -20,6 +20,8 @@ from threading import Event, Thread
 from . import __version__
 from .acoes import Acoes
 from .mapa import Mapa
+from .saudacao import compor as compor_saudacao
+from .saudacao import identificador_de_boot
 from .config import carregar as carregar_config
 from .ferramentas import Ferramentas
 from .execucao import (CaixaDeEntrada, FalaEmSegundoPlano, RecepcaoTelegram,
@@ -683,6 +685,46 @@ def _executar(zeus, store, config):
                                  Store(estado_local), espera=config.espera_telegram)
         recepcao = RecepcaoTelegram(criar_receptor, recebidas_da_hud, stopped)
         recepcao.iniciar()
+    # A saudação vem depois de tudo estar de pé: canal, HUD e agenda. Falar
+    # antes disso seria prometer presença que ainda não existe.
+    boot = identificador_de_boot()
+    canal_da_saudacao = zeus.canal.nome if zeus.canal else "hud"
+    # Duas marcas, dois trabalhos. `marcar_envio` é o portão barato: ele decide
+    # antes de gastar uma geração do modelo, e só deixa passar uma vez por
+    # ligada da máquina. A fila de saída é a entrega, com reenvio e recibo.
+    def gerar_saudacao(pedido, canal):
+        """Fala uma vez, sem passar pelo ciclo de conversa.
+
+        `zeus.conversar` registraria o pedido como se Nicolas tivesse digitado
+        "a máquina acabou de ligar", e esse turno apareceria no histórico da
+        interface como fala dele. A saudação nasce do Zeus: só a resposta é
+        registrada, e nenhuma ferramenta entra na mesa."""
+        from .guarda import limpar_resposta
+        sistema = zeus.persona.sistema(
+            fatos=store.fatos("confirmado"), perguntas=store.perguntas_abertas(),
+            agenda=store.agenda_pendente(), agora=datetime.now(timezone.utc),
+            capacidades=zeus.capacidades)
+        mensagens = [{"role": "system", "content": sistema}]
+        mensagens += zeus.persona.exemplos()
+        mensagens.append({"role": "user", "content": pedido})
+        resposta = zeus.provedor.conversar(mensagens, None, config.temperatura_conversa)
+        texto = limpar_resposta(resposta.texto)
+        if texto:
+            store.registrar_turno(canal, "zeus", texto)
+        return texto
+
+    saudacao = compor_saudacao(store, store.marcar_envio, gerar_saudacao,
+                               datetime.now(), boot,
+                               ligada=bool(config.saudacao_ao_ligar),
+                               canal=canal_da_saudacao)
+    if saudacao:
+        fila_de_saida.preparar(f"saudacao-envio:{boot}", canal_da_saudacao,
+                               saudacao, tipo="saudacao")
+        emit("saudacao", boot=boot[:8], canal=canal_da_saudacao)
+        anunciar("zeus", saudacao)
+        if fala and voz.disponivel():
+            fala.falar(saudacao, 0)
+
     ultimo_batimento = 0.0
     while not stopped.is_set():
         try:
