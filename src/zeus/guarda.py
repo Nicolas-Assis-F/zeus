@@ -47,8 +47,25 @@ CHAVES_DE_CHAMADA = ("name", "parameters", "arguments", "function", "tool",
                      "ferramenta", "nome")
 
 
+# Marcas do modelo de chat que vazam para dentro do conteúdo. Um modelo pequeno
+# às vezes escreve o próprio papel antes de responder, e Nicolas recebeu
+# mensagens começando com a palavra "assistant" — uma delas era só isso, sem
+# resposta nenhuma. Não é conteúdo: é o gabarito do formato escapando.
+PAPEL_VAZADO = re.compile(
+    r"^\s*(?:<\|im_start\|>)?\s*(?:assistant|assistente|ai|system|user)\s*[:\-–]?\s*\n?",
+    re.IGNORECASE)
+MARCAS_DE_FORMATO = re.compile(
+    r"<\|(?:im_start|im_end|eot_id|start_header_id|end_header_id|begin_of_text)\|>|</s>|<s>",
+    re.IGNORECASE)
+
+
 def limpar_resposta(texto: str) -> str:
-    """Remove objetos JSON que aparentam ser chamada de ferramenta."""
+    """Remove chamada de ferramenta vazada e marcas do formato de chat."""
+    texto = MARCAS_DE_FORMATO.sub("", texto or "")
+    anterior = None
+    while anterior != texto:                # "assistant\nassistant\n..." acontece
+        anterior = texto
+        texto = PAPEL_VAZADO.sub("", texto, count=1)
     if not texto or "{" not in texto:
         return (texto or "").strip()
     decodificador = json.JSONDecoder()

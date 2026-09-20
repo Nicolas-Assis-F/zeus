@@ -299,6 +299,7 @@ class Pesquisa:
 
     # ------------------------------------------------------------- consulta
     def buscar(self, consulta: str) -> dict:
+        """Guarda o começo da página crua para que zero resultado seja diagnosticável."""
         consulta = ESPACOS.sub(" ", str(consulta or "")).strip()[:LIMITE_DA_CONSULTA]
         if not consulta:
             raise PesquisaIndisponivel("a consulta veio vazia")
@@ -312,6 +313,7 @@ class Pesquisa:
             return guardado
 
         pagina = self.transporte(*self._pedido(consulta), timeout=self.timeout)
+        self.ultima_pagina = (pagina or "")[:1200]
         agora = self.relogio().isoformat()
         fontes = (self._ler_searxng(pagina, agora) if self.provedor == "searxng"
                   else self._ler_duckduckgo(pagina, agora))
