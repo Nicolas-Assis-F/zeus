@@ -75,6 +75,12 @@ FORMAS_DDG = (
 RESULTADO_DDG = FORMAS_DDG[0][1]   # nome antigo, mantido para quem já importava
 
 # Sinais de que a resposta não é uma página de resultado, mas uma recusa.
+# O buscador conta pedidos por minuto e por origem. Quatro tentativas em
+# sequência, como o diagnóstico fazia, são o suficiente para ele responder
+# "anomaly" — e o bloqueio dura mais que a rajada que o causou.
+ESPERA_ENTRE_TENTATIVAS = 1.6
+DESCANSO_APOS_BLOQUEIO = 180.0
+
 PADRAO_DDG = "https://html.duckduckgo.com/html/"
 LITE_DDG = "https://lite.duckduckgo.com/lite/"
 
@@ -326,9 +332,16 @@ class Pesquisa:
     transporte: object = None
     transporte_leitura: object = None
     relogio: object = None
+    espera_entre_tentativas: float = ESPERA_ENTRE_TENTATIVAS
+    descanso_apos_bloqueio: float = DESCANSO_APOS_BLOQUEIO
+    dormir: object = None
     _cache: dict = field(default_factory=dict, repr=False)
     _cache_leitura: dict = field(default_factory=dict, repr=False)
     _lidas_na_consulta: set = field(default_factory=set, repr=False)
+    # Qual tentativa funcionou da última vez. Começar por ela transforma
+    # quatro pedidos num só no caso comum, que é o caso que importa.
+    tentativa_boa: str = ""
+    _bloqueado_ate: float = 0.0
 
     def __post_init__(self):
         self.url_base = self.url_base.strip()
@@ -336,6 +349,7 @@ class Pesquisa:
             self.url_base = "https://html.duckduckgo.com/html/"
         self.transporte = self.transporte or transporte_web
         self.transporte_leitura = self.transporte_leitura or transporte_pagina
+        self.dormir = self.dormir or time.sleep
         self.relogio = self.relogio or (lambda: datetime.now(timezone.utc))
         if self.destino:
             self.destino = Path(self.destino)
@@ -409,10 +423,29 @@ class Pesquisa:
             return self.transporte(alvo, cabecalhos, timeout=self.timeout, dados=corpo)
         return self.transporte(alvo, cabecalhos, timeout=self.timeout)
 
+    def _em_descanso(self) -> float:
+        """Segundos que faltam do descanso depois de um bloqueio, ou zero."""
+        return max(0.0, self._bloqueado_ate - time.monotonic())
+
     def _percorrer(self, consulta: str, agora: str):
-        """Tenta cada pedido até um trazer fonte; guarda o que cada um deu."""
+        """Tenta cada pedido até um trazer fonte; guarda o que cada um deu.
+
+        Duas regras que vieram da primeira execução no X99. As tentativas são
+        espaçadas, porque quatro pedidos em sequência fazem o buscador
+        responder "anomaly". E um bloqueio interrompe a rodada na hora: insistir
+        depois de levar não é persistência, é alongar o castigo."""
         tentativas, motivos, ultimo_erro = [], [], ""
-        for nome, alvo, metodo, cabecalhos, corpo in self._tentativas(consulta):
+        falta = self._em_descanso()
+        for indice, (nome, alvo, metodo, cabecalhos, corpo) in enumerate(
+                self._tentativas(consulta)):
+            if indice and falta:
+                # Em descanso, só a tentativa que costuma funcionar vale o
+                # pedido. As outras seriam rajada, que é o que causou o
+                # bloqueio.
+                motivos.append(f"descanso de {int(falta)}s após bloqueio")
+                break
+            if indice:
+                self.dormir(self.espera_entre_tentativas)
             try:
                 pagina = self._pedir(alvo, metodo, cabecalhos, corpo)
             except PesquisaIndisponivel as erro:
@@ -427,8 +460,17 @@ class Pesquisa:
             tentativas.append({"tentativa": nome, "bytes": len(pagina or ""),
                                "fontes": len(fontes), "forma": forma or ""})
             if fontes:
+                self.tentativa_boa = nome
+                self._bloqueado_ate = 0.0
                 return fontes, {"tentativas": tentativas, "forma": forma}
-            motivos.append(f"{nome}: {diagnosticar_pagina(pagina)}")
+            leitura = diagnosticar_pagina(pagina)
+            motivos.append(f"{nome}: {leitura}")
+            if "recusa" in leitura:
+                self._bloqueado_ate = time.monotonic() + self.descanso_apos_bloqueio
+                motivos.append(f"parei aqui: mais pedidos agora só alongam o bloqueio "
+                               f"(descanso de {int(self.descanso_apos_bloqueio)}s)")
+                break
+            continue
         if not motivos:
             # Nenhuma tentativa chegou a trazer página: isso é falha de rede, e
             # falha de rede não pode virar "não achei nada". A diferença entre
@@ -436,19 +478,24 @@ class Pesquisa:
             raise PesquisaIndisponivel(ultimo_erro or "nenhuma tentativa foi feita")
         return [], {"tentativas": tentativas, "motivo": "; ".join(motivos), "forma": ""}
 
-    def conferir(self, consulta: str = "teste de busca") -> dict:
-        """Roda a cadeia inteira sem parar no primeiro acerto e conta tudo.
+    def conferir(self, consulta: str = "teste de busca", completo: bool = False) -> dict:
+        """Diz onde a busca para, sem adivinhação.
 
-        É o que `./zeus pesquisar --diagnostico` mostra: cada endereço, cada
-        método, quantos bytes voltaram e qual marcação casou. Uma execução
-        responde onde a busca parou, em vez de trocar palpite por palpite."""
+        Por padrão ele para no primeiro acerto, e espaça as tentativas. A
+        primeira versão disparava as quatro em sequência, e foi ela mesma que
+        fez o buscador responder "anomaly" — o diagnóstico criava o defeito que
+        estava tentando medir. `completo` força a lista inteira, sabendo do
+        preço."""
         if not self.disponivel():
             return {"consulta": consulta, "disponivel": False,
                     "motivo": self.diagnostico(), "tentativas": []}
         agora = self.relogio().isoformat()
         linhas = []
-        for nome, alvo, metodo, cabecalhos, corpo in self._tentativas(consulta):
+        for indice, (nome, alvo, metodo, cabecalhos, corpo) in enumerate(
+                self._tentativas(consulta)):
             registro = {"tentativa": nome, "metodo": metodo, "url": alvo}
+            if indice:
+                self.dormir(self.espera_entre_tentativas)
             try:
                 pagina = self._pedir(alvo, metodo, cabecalhos, corpo)
             except PesquisaIndisponivel as erro:
@@ -462,9 +509,17 @@ class Pesquisa:
                              "forma": forma or "", "leitura": diagnosticar_pagina(pagina)})
             if fontes:
                 registro["primeira"] = fontes[0].url
+                self.tentativa_boa = nome
             linhas.append(registro)
+            if fontes and not completo:
+                break
+            if "recusa" in registro.get("leitura", ""):
+                registro["parei_aqui"] = ("mais pedidos agora só alongam o bloqueio")
+                self._bloqueado_ate = time.monotonic() + self.descanso_apos_bloqueio
+                break
         return {"consulta": consulta, "disponivel": True,
                 "provedor": self.provedor, "tentativas": linhas,
+                "boa": self.tentativa_boa,
                 "alguma_funcionou": any(l.get("fontes") for l in linhas)}
 
     # --------------------------------------------------------------- leitura
@@ -546,6 +601,11 @@ class Pesquisa:
             tentativas.append((nome + "/get",
                                endereco + "?" + urllib.parse.urlencode({"q": consulta}),
                                "GET", None, None))
+        if self.tentativa_boa:
+            # A que funcionou da última vez vai na frente. Assim a busca comum
+            # gasta um pedido, e a lista inteira só é percorrida quando essa
+            # também falha.
+            tentativas.sort(key=lambda linha: linha[0] != self.tentativa_boa)
         return tentativas
 
     # -------------------------------------------------------------- leitura

@@ -23,6 +23,19 @@ if [[ ! -f "$raiz/src/zeus/__main__.py" ]]; then
   exit 2
 fi
 
+# O arquivo de exemplo está no git e o Zeus nunca lê dele, mas é o primeiro
+# que aparece para quem procura onde configurar — e já foi preenchido com
+# valores de verdade duas vezes. Avisar aqui é mais barato que revogar depois.
+if grep -Eq 'sk-[A-Za-z0-9_-]{16,}|[0-9]{8,}:[A-Za-z0-9_-]{30,}' \
+     "$raiz/config/config.example.json" 2>/dev/null; then
+  echo >&2
+  echo "ATENÇÃO: config/config.example.json tem valor que parece segredo." >&2
+  echo "Esse arquivo vai para o GitHub. Revogue a chave e escreva em" >&2
+  echo "~/.config/zeus/config.json, que é de onde o Zeus lê." >&2
+  echo "Para limpar:  git checkout -- config/config.example.json" >&2
+  echo >&2
+fi
+
 mkdir -p "$(dirname "$unidade")"
 cat > "$unidade" <<UNIDADE
 [Unit]

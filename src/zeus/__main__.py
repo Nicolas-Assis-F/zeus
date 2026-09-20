@@ -267,7 +267,10 @@ def main():
     busca.add_argument("--cru", action="store_true",
                        help="Sem resultado, mostra o começo da página recebida")
     busca.add_argument("--diagnostico", action="store_true",
-                       help="Testa cada endereço e método e diz onde a busca para")
+                       help="Testa os endereços em ordem e diz onde a busca para")
+    busca.add_argument("--completo", action="store_true",
+                       help="No diagnóstico, tenta todos mesmo depois de acertar "
+                            "(rajada: pode fazer o buscador bloquear)")
 
     conversa = commands.add_parser("conversar", help="Uma troca pelo terminal")
     conversa.add_argument("texto")
@@ -375,10 +378,11 @@ def main():
             # parecem. Aqui dá para ver qual dos dois é.
             pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
             if args.diagnostico:
-                relato = pesquisa.conferir(args.consulta)
+                relato = pesquisa.conferir(args.consulta, completo=args.completo)
                 emit("pesquisa_diagnostico", disponivel=relato.get("disponivel"),
                      provedor=relato.get("provedor", ""),
                      alguma_funcionou=relato.get("alguma_funcionou", False),
+                     boa=relato.get("boa", ""),
                      motivo=relato.get("motivo", ""))
                 for linha in relato.get("tentativas", []):
                     print(f"- {linha['tentativa']:<10} {linha.get('metodo','')}"
@@ -390,6 +394,8 @@ def main():
                         print(f"  {detalhe}")
                     if linha.get("primeira"):
                         print(f"  {linha['primeira']}")
+                    if linha.get("parei_aqui"):
+                        print(f"  {linha['parei_aqui']}")
                 return 0 if relato.get("alguma_funcionou") else 3
             if not pesquisa.disponivel():
                 emit("pesquisa", situacao=pesquisa.diagnostico())

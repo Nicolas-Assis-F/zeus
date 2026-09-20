@@ -58,6 +58,7 @@ def transporte_fixo(paginas):
 
 
 def montar_pesquisa(pagina, **ajustes):
+    ajustes.setdefault("dormir", lambda _: None)   # o teste não espera de verdade
     return Pesquisa(provedor="duckduckgo", transporte=transporte_fixo(pagina),
                     relogio=lambda: datetime(2026, 9, 19, 21, 0, tzinfo=timezone.utc),
                     **ajustes)
@@ -360,15 +361,29 @@ class ZeroFonteExplicado(unittest.TestCase):
 
 
 class Conferencia(unittest.TestCase):
-    def test_conferir_roda_tudo_e_nao_para_no_primeiro_acerto(self):
+    def test_conferir_para_no_primeiro_acerto(self):
+        """A primeira versão disparava as quatro em sequência, e foi ela mesma
+        que fez o buscador responder 'anomaly'. O diagnóstico criava o defeito
+        que estava tentando medir."""
         pesquisa = montar_pesquisa(PAGINA_DDG)
         relato = pesquisa.conferir("teste")
         self.assertTrue(relato["alguma_funcionou"])
+        self.assertEqual(len(relato["tentativas"]), 1)
+        self.assertTrue(relato["tentativas"][0]["primeira"].startswith("http"))
+        self.assertEqual(relato["boa"], "html/post")
+
+    def test_conferir_completo_roda_tudo_a_pedido(self):
+        relato = montar_pesquisa(PAGINA_DDG).conferir("teste", completo=True)
         self.assertEqual(len(relato["tentativas"]), 4)
         for linha in relato["tentativas"]:
             self.assertIn("url", linha)
             self.assertIn("bytes", linha)
-        self.assertTrue(relato["tentativas"][0]["primeira"].startswith("http"))
+
+    def test_conferir_para_assim_que_leva_recusa(self):
+        """Insistir depois de levar bloqueio não é persistência: alonga o castigo."""
+        relato = montar_pesquisa(PAGINA_BLOQUEIO).conferir("teste")
+        self.assertEqual(len(relato["tentativas"]), 1)
+        self.assertIn("alongam o bloqueio", relato["tentativas"][0]["parei_aqui"])
 
     def test_conferir_com_busca_desligada_devolve_o_diagnostico(self):
         relato = Pesquisa().conferir()
@@ -395,3 +410,62 @@ class LigadaPorPadrao(unittest.TestCase):
             self.assertIn("unusual traffic", saida["instrucao"])
             self.assertIn("motivo", saida["instrucao"])
             store.connection.close()
+
+
+class RitmoEDescanso(unittest.TestCase):
+    """O buscador conta pedidos por origem. Rajada vira bloqueio, e bloqueio
+    dura mais do que a rajada que o causou — foi o que a primeira execução no
+    X99 mostrou: a primeira tentativa trouxe dez fontes, e as três seguintes,
+    disparadas em sequência, levaram 'anomaly'."""
+
+    def test_as_tentativas_sao_espacadas(self):
+        esperas = []
+        pesquisa = montar_pesquisa(PAGINA_VAZIA, dormir=esperas.append)
+        pesquisa.buscar("algo")
+        self.assertEqual(len(esperas), 3)        # quatro tentativas, três esperas
+        self.assertTrue(all(e > 1 for e in esperas))
+
+    def test_a_primeira_tentativa_nao_espera(self):
+        esperas = []
+        pesquisa = montar_pesquisa(PAGINA_DDG, dormir=esperas.append)
+        pesquisa.buscar("algo")
+        self.assertEqual(esperas, [])
+
+    def test_recusa_interrompe_a_rodada_na_hora(self):
+        pesquisa = montar_pesquisa(PAGINA_BLOQUEIO)
+        resultado = pesquisa.buscar("algo")
+        self.assertEqual(len(resultado["tentativas"]), 1)
+        self.assertIn("alongam o bloqueio", resultado["motivo"])
+
+    def test_depois_do_bloqueio_so_a_tentativa_conhecida_vale_o_pedido(self):
+        respostas = {"n": 0}
+
+        def paginas(url):
+            respostas["n"] += 1
+            return PAGINA_DDG if respostas["n"] == 1 else PAGINA_BLOQUEIO
+
+        pesquisa = montar_pesquisa(paginas, dormir=lambda _: None)
+        pesquisa.buscar("primeira")             # acerta e aprende a tentativa boa
+        self.assertEqual(pesquisa.tentativa_boa, "html/post")
+        segunda = pesquisa.buscar("segunda")    # leva recusa e entra em descanso
+        self.assertIn("recusa", segunda["motivo"])
+        antes = respostas["n"]
+        terceira = pesquisa.buscar("terceira")  # em descanso: um pedido, não quatro
+        self.assertEqual(respostas["n"] - antes, 1)
+        self.assertIn("descanso", terceira["motivo"])
+
+    def test_a_tentativa_que_funcionou_vai_na_frente_da_proxima_vez(self):
+        pedidos = []
+
+        def paginas(url):
+            pedidos.append(url)
+            return PAGINA_LITE if "lite" in url else PAGINA_VAZIA
+
+        pesquisa = montar_pesquisa(paginas, dormir=lambda _: None)
+        pesquisa.buscar("primeira")
+        self.assertEqual(pesquisa.tentativa_boa, "lite/post")
+        pedidos.clear()
+        pesquisa.buscar("segunda")
+        # Um pedido só, e direto no endereço que funciona.
+        self.assertEqual(len(pedidos), 1)
+        self.assertIn("lite", pedidos[0])

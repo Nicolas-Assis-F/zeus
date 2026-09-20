@@ -159,3 +159,58 @@ por palpite.
 
 Com `--cru`, a busca normal mostra o começo da página recebida quando não achou
 nada.
+
+## O que a primeira execução no X99 ensinou
+
+O diagnóstico rodou, e o resultado foi mais interessante que um simples
+"funciona" ou "não funciona":
+
+```
+- html/post  POST  29570 bytes  10 fontes  forma=html
+  https://pt.wikipedia.org/wiki/Lista_de_presidentes_do_Brasil
+- html/get   GET   14259 bytes   0 fontes
+  a busca respondeu uma recusa (anomaly)
+- lite/post  POST  14241 bytes   0 fontes
+  a busca respondeu uma recusa (anomaly)
+- lite/get   GET   14235 bytes   0 fontes
+  a busca respondeu uma recusa (anomaly)
+```
+
+A primeira tentativa trouxe dez fontes. As três seguintes levaram bloqueio. E
+a execução seguinte, um minuto depois, levou bloqueio nas quatro.
+
+A causa não era o buscador estar fora do ar: era **o próprio diagnóstico**.
+Quatro pedidos em sequência, da mesma origem, disparam a detecção de anomalia
+do DuckDuckGo — e o bloqueio dura bem mais que a rajada que o causou. A
+ferramenta feita para medir o problema estava criando o problema.
+
+Três mudanças vieram daí.
+
+**As tentativas são espaçadas**, em 1,6 segundo. Só custa tempo quando a
+primeira falha, que é o caso raro.
+
+**Recusa interrompe a rodada na hora.** Insistir depois de levar bloqueio não
+é persistência, é alongar o castigo. Um bloqueio abre um descanso de três
+minutos, e durante ele só a tentativa que costuma funcionar vale o pedido.
+
+**A tentativa que funcionou vai na frente da próxima vez.** No caso comum a
+busca gasta um pedido, não quatro — e a lista inteira só é percorrida quando
+esse também falha.
+
+O `--diagnostico` também parou de rodar as quatro: ele para no primeiro
+acerto. Para forçar a lista inteira, sabendo do preço, existe `--completo`.
+
+### Se o bloqueio voltar
+
+Um endereço IP residencial compartilhado é o que mais sofre com isso. A saída
+definitiva é não depender de serviço público: suba um SearXNG na rede de casa
+e aponte para ele.
+
+```json
+"pesquisa_provedor": "searxng",
+"pesquisa_url": "http://192.168.100.211:8080"
+```
+
+Aí a busca sai de uma instância sua, sem limite de rajada imposto por
+terceiro, e continua com a mesma procedência e a mesma barreira contra página
+que tenta mandar.
