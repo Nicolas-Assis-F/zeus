@@ -53,6 +53,10 @@ Com modelo e canal configurados (veja `docs/CONFIGURACAO.md`):
 ./zeus medir --modelos llama3.1:8b-instruct-q4_K_M,qwen2.5:7b-instruct
 ```
 
+A interface é também o painel de saúde do X99: CPU por núcleo, GPU, memória,
+disco, rede e o mapa das capacidades ativas, em `GET /saude`. Detalhes em
+`docs/INTERFACE_E_VOZ.md`.
+
 Com `chave_hud` definida, `./zeus run` também sobe a interface no navegador e
 imprime o endereço no evento `started`. Telegram e interface compartilham a
 mesma memória e os mesmos episódios.

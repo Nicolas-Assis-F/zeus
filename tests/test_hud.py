@@ -49,6 +49,17 @@ class Servidor(unittest.TestCase):
         self.assertEqual(codigo, 200)
         self.assertEqual(json.loads(corpo)["modelo"], "modelo-falso")
 
+    def test_saude_responde_medida_e_exige_a_mesma_chave(self):
+        """O painel de saúde é dado: sem chave, ninguém mede o X99 de fora."""
+        self.assertEqual(self.pedir("/saude", chave="errada")[0], 401)
+        self.assertEqual(self.pedir("/saude", chave=None)[0], 401)
+        codigo, corpo = self.pedir("/saude")
+        self.assertEqual(codigo, 200)
+        medida = json.loads(corpo)
+        self.assertEqual(medida["tipo"], "saude")
+        self.assertIn("percentual", medida["memoria"])
+        self.assertEqual(len(medida["cpu"]["por_nucleo"]), medida["cpu"]["nucleos"])
+
     def test_mensagem_entra_na_fila_do_laco_principal(self):
         self.assertEqual(self.pedir("/mensagem", {"texto": "bom dia"})[0], 202)
         self.assertEqual(self.recebidas, [{"tipo": "texto", "texto": "bom dia"}])
