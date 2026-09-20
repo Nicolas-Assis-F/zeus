@@ -175,3 +175,57 @@ do LLM nem conversa contínua por palavra de ativação. O microfone continua co
 início e parada explícitos e limite de 60 segundos na interface.
 
 Referência: [faster-whisper](https://github.com/SYSTRAN/faster-whisper).
+
+## Painel de saúde
+
+A HUD deixou de ser só a janela de conversa. O X99 roda sem monitor num canto
+da casa, e quando o Zeus fica lento a pergunta é sempre a mesma: é o modelo, é
+a RAM, é a GPU térmica, é o disco cheio? Sem número na tela a resposta vira
+palpite, então a página agora é também o painel de saúde da máquina.
+
+A rota é `GET /saude`, com a mesma chave das outras rotas de dado — medir o X99
+de fora sem chave seria um vazamento discreto de inventário. O corpo vem de
+`src/zeus/saude.py`, que lê `/proc`, `/sys/class/hwmon` e `nvidia-smi`. Nenhuma
+biblioteca externa: a promessa de clonar e rodar continua valendo.
+
+Três decisões que o painel tomou de propósito:
+
+**Nada aqui vira zero por educação.** Uma GeForce não informa potência, e
+`nvidia-smi` devolve `[N/A]`. O painel mostra `—`, não `0 W`. O mesmo vale para
+a primeira amostra de CPU: `/proc/stat` guarda contadores desde o boot, então
+ocupação só existe entre duas leituras, e antes da segunda o campo é `None`.
+
+**`iowait` conta como ocioso.** Disco travado não é CPU ocupada. Somar iowait
+inflaria o painel exatamente no cenário em que ele precisa apontar para o
+disco.
+
+**`MemAvailable`, não `MemFree`.** Num servidor saudável a memória livre vive
+perto de zero de propósito, porque o kernel usa o resto como cache. O número
+honesto é o que dá para recuperar.
+
+O navegador pede `/saude` a cada dois segundos e para quando a aba sai de foco.
+`nvidia-smi` custa uns 40 ms e é consultado no máximo a cada três segundos; se
+não existe placa, a busca acontece uma vez e nunca mais.
+
+### O que a página mostra
+
+A coluna da esquerda é o plasma: o orbe, o estado (ocioso, ouvindo, pensando,
+falando, offline) e os chips de capacidade. O anel externo do orbe é a
+ocupação da CPU, e o ritmo da respiração acompanha a carga — dá para sentir a
+máquina sob pressão sem ler número nenhum.
+
+Abaixo vem o mapa do Zeus: cada nó é uma capacidade, e a aresta acende quando
+ela está verificada. É o mapa honesto que dá para desenhar hoje. Um mapa
+geográfico exige sensor com posição, e ainda não existe nenhum; desenhar um
+agora seria enfeite.
+
+A coluna da direita são os sinais vitais: CPU (total, por núcleo, frequência,
+temperatura, carga), GPU (uso, VRAM, temperatura, potência, ventoinha),
+memória e swap, disco do estado do Zeus, rede e o próprio processo. A faixa
+embaixo guarda os últimos três minutos de CPU, memória e GPU — o suficiente
+para ver se o pico foi a resposta que acabou de sair ou algo que já estava lá.
+
+As pendências (perguntas, agenda, entregas, memória, operação) ficam em abas,
+com contador, em vez de empilhadas numa lista só.
+
+Abaixo de 980 px a página vira três vistas — Conversa, Saúde e Mapa — no celular.
