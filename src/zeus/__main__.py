@@ -19,6 +19,7 @@ from threading import Event, Thread
 
 from . import __version__
 from .acoes import Acoes
+from .mapa import Mapa
 from .config import carregar as carregar_config
 from .ferramentas import Ferramentas
 from .execucao import (CaixaDeEntrada, FalaEmSegundoPlano, RecepcaoTelegram,
@@ -72,7 +73,8 @@ def montar(args):
     persona = Persona.carregar(config.persona)
     pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
     ferramentas = Ferramentas(store, pesquisa=pesquisa,
-                              acoes=montar_acoes(config, store))
+                              acoes=montar_acoes(config, store),
+                              mapa=montar_mapa(config, args.state_dir.expanduser()))
     canal = None
     if config.canal_configurado:
         from .canais import CanalTelegram
@@ -90,6 +92,19 @@ def montar_pesquisa(config, estado):
                     maximo_de_bytes=config.pesquisa_max_bytes,
                     maximo_de_paginas=config.pesquisa_max_paginas,
                     destino=Path(estado) / "pesquisa")
+
+
+def montar_mapa(config, estado):
+    """As telas ficam no estado, não no repositório: são cache, não código."""
+    from .mapa import BUSCA_PADRAO, TELAS_PADRAO
+    return Mapa(ativo=bool(config.mapa_ativo),
+                telas_url=config.mapa_telas_url or TELAS_PADRAO,
+                busca_url=config.mapa_busca_url or BUSCA_PADRAO,
+                centro_lat=config.mapa_centro_lat,
+                centro_lon=config.mapa_centro_lon,
+                zoom=config.mapa_zoom,
+                cache_maximo_mb=config.mapa_cache_mb,
+                destino=Path(estado) / "mapa")
 
 
 def persona_de(config):
@@ -286,6 +301,7 @@ def main():
                  pesquisa=montar_pesquisa(config, args.state_dir.expanduser()).diagnostico(),
                  acoes=montar_acoes(config).diagnostico(),
                  contexto=diagnostico_do_contexto(config, persona_de(config)),
+                 mapa=montar_mapa(config, args.state_dir.expanduser()).diagnostico(),
                  hud="configurada" if config.chave_hud else "sem chave definida",
                  config=config.sem_segredos())
             return 0 if integrity == "ok" and modelo_verificado else 1

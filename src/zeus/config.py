@@ -42,6 +42,15 @@ class Config:
     # Pastas que o Zeus pode olhar. Vazio desliga as ações no computador.
     # A lista é dele por escolha de Nicolas, não por descoberta: o Zeus nunca
     # sai procurando o que mais existe na máquina.
+    # Mapa de localização. O centro padrão é Goiânia; troque para a sua casa e
+    # o mapa abre já olhando para o lugar certo.
+    mapa_ativo: bool = True
+    mapa_centro_lat: float = -16.6869
+    mapa_centro_lon: float = -49.2648
+    mapa_zoom: int = 13
+    mapa_telas_url: str = ""
+    mapa_busca_url: str = ""
+    mapa_cache_mb: int = 200
     acoes_pastas: tuple = ()
     acoes_abrir: bool = False
     acoes_max_bytes: int = 200_000

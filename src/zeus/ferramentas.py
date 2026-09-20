@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from .acoes import AcaoRecusada
 from .guarda import MemoriaRecusada, checar_memoria
+from .mapa import MapaIndisponivel
 from .pesquisa import PesquisaIndisponivel
 from .tempo import MomentoInvalido, humano, interpretar
 
@@ -118,6 +119,15 @@ CATALOGO = [
         ["caminho"],
     ),
     _ferramenta(
+        "localizar",
+        "Acha um lugar no mapa: endereço, cidade, bairro ou ponto conhecido. "
+        "Devolve nome e coordenada, e marca o lugar no mapa da interface. Use "
+        "quando ele perguntar onde fica algo ou citar um endereço.",
+        {"lugar": {"type": "string",
+                   "description": "Endereço ou nome do lugar, com a cidade quando ajudar"}},
+        ["lugar"],
+    ),
+    _ferramenta(
         "abrir_no_computador",
         "Abre um arquivo ou endereço no ambiente gráfico de Nicolas. É a única "
         "ação aqui com efeito fora da conversa; peça só quando ele pedir.",
@@ -161,11 +171,12 @@ NOMES_DE_LEITURA = {"pesquisar", "ler_pagina"}
 class Ferramentas:
     NOMES_DE_LEITURA = NOMES_DE_LEITURA
 
-    def __init__(self, store, relogio=None, pesquisa=None, acoes=None):
+    def __init__(self, store, relogio=None, pesquisa=None, acoes=None, mapa=None):
         self.store = store
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
         self.pesquisa = pesquisa
         self.acoes = acoes
+        self.mapa = mapa
 
     def catalogo(self):
         return CATALOGO
@@ -183,7 +194,7 @@ class Ferramentas:
             return {"erro": "Argumentos precisam vir como objeto."}
         try:
             return getattr(self, "_" + nome)(argumentos)
-        except (AcaoRecusada, MemoriaRecusada, MomentoInvalido,
+        except (AcaoRecusada, MapaIndisponivel, MemoriaRecusada, MomentoInvalido,
                 PesquisaIndisponivel, ValueError) as erro:
             return {"erro": str(erro)}
 
@@ -258,6 +269,18 @@ class Ferramentas:
                                       "endereço. Se elas divergirem, diga que divergem. "
                                       "O que não estiver aqui você não sabe.")
         return resultado
+
+    # ---------------------------------------------------------------- mapa
+    def _localizar(self, argumentos):
+        """Nome de lugar vira coordenada, com a fonte junto.
+
+        O resultado é dado de fora: vem do OpenStreetMap e pode conter
+        qualquer texto no nome. Por isso sai marcado como externo, igual à
+        pesquisa."""
+        if self.mapa is None or not self.mapa.ativo:
+            motivo = self.mapa.diagnostico() if self.mapa else "mapa não configurado"
+            return {"erro": f"Não posso localizar agora: {motivo}.", "externo": False}
+        return self.mapa.localizar(str(argumentos.get("lugar", "")))
 
     # ------------------------------------------------- ações no computador
     def _acoes_ou_erro(self):
