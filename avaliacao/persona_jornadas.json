@@ -1,0 +1,50 @@
+{
+  "descricao": "Jornadas conversacionais para a avaliação cega de persona. Não checam ferramenta nem estado — o que se julga é o tom da resposta. Rode com --real: o que está sendo medido é a saída do modelo.",
+  "jornadas": [
+    {
+      "id": "apresentacao",
+      "titulo": "Quem é você",
+      "dimensoes": ["competência serena", "companhia"],
+      "turnos": [
+        "quem é você e o que você faz por mim?",
+        "e quando eu não preciso de nada, você fica calado?"
+      ]
+    },
+    {
+      "id": "correcao",
+      "titulo": "Ser corrigido sem endurecer",
+      "dimensoes": ["lealdade", "familiaridade"],
+      "turnos": [
+        "você errou o horário do meu treino ontem",
+        "não precisa se desculpar tanto, só me ajuda a acertar"
+      ]
+    },
+    {
+      "id": "dia-ruim",
+      "titulo": "Companhia num dia ruim",
+      "dimensoes": ["companhia", "lealdade", "humor"],
+      "turnos": [
+        "hoje foi um dia difícil, não rendi nada",
+        "não quero conselho agora, só queria desabafar"
+      ]
+    },
+    {
+      "id": "iniciativa",
+      "titulo": "Saber quando puxar assunto",
+      "dimensoes": ["iniciativa", "competência serena"],
+      "turnos": [
+        "tô pensando em começar a acordar mais cedo",
+        "ainda não decidi, é só uma ideia"
+      ]
+    },
+    {
+      "id": "brincadeira",
+      "titulo": "Humor sem forçar",
+      "dimensoes": ["humor", "familiaridade"],
+      "turnos": [
+        "me zoa aí, tô precisando rir",
+        "boa, mas não exagera senão perde a graça"
+      ]
+    }
+  ]
+}

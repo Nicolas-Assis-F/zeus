@@ -80,3 +80,39 @@ real), `avancar` (`+30m`, `+3h`), `reiniciar`, `canal_fora`, e `espera` com
 
 O avaliador tem teste próprio que quebra o Zeus de propósito e exige reprovação.
 Um avaliador que só sabe dizer "passou" não mede nada.
+
+## Avaliação cega de persona
+
+Jornada mede comportamento; ela não mede tom. Ajustar personalidade no escuro
+não é método: a única evidência sobre voz, hoje, é a impressão depois de uma
+conversa — foi assim que apareceu o "parece um robô". Para escolher entre
+variantes de `persona.md` com método, o comando `./zeus avaliar-persona` roda N
+variantes sobre as mesmas jornadas conversacionais e monta uma folha cega.
+
+```bash
+./zeus avaliar-persona --real \
+  --variantes config/persona.md,config/persona-mais-solta.md \
+  --folha /tmp/folha.json --rodada /tmp/rodada.json
+```
+
+Como funciona, e por que cada parte existe:
+
+- **Cega de propósito.** A folha (`--folha`) traz as respostas sob rótulos
+  opacos, embaralhados a cada jornada. Nada liga rótulo a variante — nem a
+  ordem. O gabarito fica selado na rodada (`--rodada`), fora da folha.
+- **Julgamento por critério do plano mestre:** competência serena, humor,
+  lealdade, familiaridade, iniciativa e companhia. Nicolas dá nota 0–5 a cada
+  rótulo, num JSON `{jornada: {rótulo: {critério: nota}}}`.
+- **Revelação só depois.** `./zeus avaliar-persona --revelar --rodada ...
+  --julgamento ...` liga rótulo a variante e agrega por variante, gravando o
+  resultado junto da versão da persona (nome do arquivo mais marca do conteúdo),
+  para comparar ao longo do tempo.
+
+As jornadas de tom vivem em `avaliacao/persona_jornadas.json` — só `id`,
+`titulo`, `dimensoes` e `turnos` (as falas de Nicolas).
+
+**Limitação declarada, e ela é dupla.** A amostra é pequena e o julgamento é de
+uma pessoa só: serve para escolher entre variantes, não para afirmar qualidade
+absoluta. E, como no resto da avaliação, **simulação com dublê não fecha isto**
+— o que está sendo medido é a saída do modelo real, então a rodada que vale é a
+`--real`, no X99.
