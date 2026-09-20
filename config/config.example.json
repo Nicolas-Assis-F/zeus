@@ -21,7 +21,7 @@
   "escuta_beam": 1,
   "escuta_silencio_ms": 500,
   "escuta_vocabulario": "",
-  "pesquisa_provedor": "nenhum",
+  "pesquisa_provedor": "duckduckgo",
   "pesquisa_url": "",
   "pesquisa_max_fontes": 4,
   "pesquisa_max_paginas": 3,

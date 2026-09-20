@@ -216,8 +216,11 @@ class Ferramentas:
         resultado = self.pesquisa.buscar(str(argumentos.get("consulta", "")))
         resultado["externo"] = True
         if resultado.get("sem_resultado"):
-            resultado["instrucao"] = ("Nenhuma fonte encontrada. Diga isso a Nicolas "
-                                      "em vez de responder de memória.")
+            # O motivo vai junto: "não achei" e "a busca está cega" são coisas
+            # diferentes, e o Zeus precisa poder dizer qual das duas aconteceu.
+            resultado["instrucao"] = (
+                "Nenhuma fonte encontrada (" + resultado.get("motivo", "sem motivo")[:200] +
+                "). Diga isso a Nicolas, com o motivo, em vez de responder de memória.")
         else:
             resultado["instrucao"] = ("Responda com base nestas fontes, citando o "
                                       "endereço. Se elas divergirem, diga que divergem. "

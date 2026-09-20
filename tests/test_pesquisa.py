@@ -45,12 +45,15 @@ PAGINA_VAZIA = "<div class='no-results'>Nada encontrado</div>"
 
 
 def transporte_fixo(paginas):
-    def transporte(url, cabecalhos=None, timeout=None):
+    def transporte(url, cabecalhos=None, timeout=None, dados=None):
         transporte.chamadas.append(url)
+        transporte.pedidos.append({"url": url, "metodo": "POST" if dados else "GET",
+                                   "dados": dados})
         if callable(paginas):
             return paginas(url)
         return paginas
     transporte.chamadas = []
+    transporte.pedidos = []
     return transporte
 
 
@@ -258,3 +261,137 @@ class CapacidadeEProcedencia(unittest.TestCase):
                         self.assertIn('cite as fontes', contexto)
                 finally:
                     store.close()
+
+
+PAGINA_LITE = """
+<table>
+ <tr><td><a class="result-link" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fpt.wikipedia.org%2Fwiki%2FDeodoro">
+   Deodoro da Fonseca</a></td></tr>
+ <tr><td class="result-snippet">Primeiro presidente do Brasil, de 1889 a 1891.</td></tr>
+</table>
+"""
+
+# Marcação futura: nenhuma classe conhecida, só o redirecionador do buscador.
+PAGINA_CLASSES_NOVAS = """
+<li data-testid="result"><a class="x7Kd2" href="/l/?uddg=https%3A%2F%2Fexemplo.org%2Fnovo">
+  Título que sobreviveu</a></li>
+"""
+
+PAGINA_BLOQUEIO = ("<html><body>" + "x" * 400 +
+                   "<p>If this error persists, our unusual traffic detection "
+                   "may have flagged your IP.</p></body></html>")
+
+
+class CadeiaDeTentativas(unittest.TestCase):
+    """Um endereço só e um método só é aposta; a busca tenta em ordem."""
+
+    def test_o_primeiro_pedido_e_post_com_a_consulta_no_corpo(self):
+        pesquisa = montar_pesquisa(PAGINA_DDG)
+        pesquisa.buscar("crocodilo")
+        primeiro = pesquisa.transporte.pedidos[0]
+        self.assertEqual(primeiro["metodo"], "POST")
+        self.assertIn(b"q=crocodilo", primeiro["dados"])
+        self.assertEqual(len(pesquisa.transporte.pedidos), 1)   # acertou de primeira
+
+    def test_cai_para_o_endereco_lite_quando_o_html_vem_vazio(self):
+        def paginas(url):
+            return PAGINA_LITE if "lite" in url else PAGINA_VAZIA
+
+        pesquisa = montar_pesquisa(paginas)
+        resultado = pesquisa.buscar("primeiro presidente do brasil")
+        self.assertEqual(resultado["forma"], "lite")
+        self.assertIn("Deodoro", resultado["fontes"][0]["titulo"])
+        self.assertTrue(any("lite" in u for u in pesquisa.transporte.chamadas))
+
+    def test_marcacao_desconhecida_ainda_rende_fonte_pelo_redirecionador(self):
+        """Se as classes mudarem, título e endereço ainda sustentam a resposta."""
+        pesquisa = montar_pesquisa(PAGINA_CLASSES_NOVAS)
+        resultado = pesquisa.buscar("qualquer coisa")
+        self.assertEqual(resultado["forma"], "redirecionador")
+        self.assertEqual(resultado["fontes"][0]["url"], "https://exemplo.org/novo")
+        # Sem resumo: o campo some em vez de virar string vazia na resposta.
+        self.assertNotIn("trecho", resultado["fontes"][0])
+
+    def test_endereco_escolhido_a_mao_nao_ganha_companhia(self):
+        pesquisa = montar_pesquisa(PAGINA_VAZIA,
+                                   url_base="https://busca.minha.casa/pesquisa")
+        pesquisa.buscar("algo")
+        anfitrioes = {u.split("/")[2] for u in pesquisa.transporte.chamadas}
+        self.assertEqual(anfitrioes, {"busca.minha.casa"})
+
+
+class ZeroFonteExplicado(unittest.TestCase):
+    """Zero fonte sem motivo não distingue 'não existe' de 'estou cego'."""
+
+    def test_pagina_de_recusa_e_nomeada_como_recusa(self):
+        resultado = montar_pesquisa(PAGINA_BLOQUEIO).buscar("qualquer coisa")
+        self.assertTrue(resultado["sem_resultado"])
+        self.assertIn("recusa", resultado["motivo"])
+        self.assertIn("unusual traffic", resultado["motivo"])
+
+    def test_marcacao_presente_e_nao_reconhecida_aponta_para_a_marcacao(self):
+        pagina = "<div class=\"result__body\">" + "y" * 300 + "</div>"
+        resultado = montar_pesquisa(pagina).buscar("algo")
+        self.assertIn("marcação mudou", resultado["motivo"])
+
+    def test_pagina_quase_vazia_diz_quantos_bytes_vieram(self):
+        resultado = montar_pesquisa("<html></html>").buscar("algo")
+        self.assertIn("bytes", resultado["motivo"])
+
+    def test_o_motivo_cobre_todas_as_tentativas_e_nao_so_a_ultima(self):
+        resultado = montar_pesquisa(PAGINA_VAZIA).buscar("algo")
+        self.assertEqual(len(resultado["tentativas"]), 4)   # html e lite, post e get
+        self.assertIn("html/post", resultado["motivo"])
+        self.assertIn("lite/get", resultado["motivo"])
+
+    def test_falha_de_rede_continua_sendo_recusa_e_nao_ausencia(self):
+        def cai(url):
+            raise PesquisaIndisponivel("não consegui alcançar a busca: timeout")
+        with self.assertRaises(PesquisaIndisponivel):
+            montar_pesquisa(cai).buscar("algo")
+
+    def test_zero_fonte_nao_entra_no_cache(self):
+        """Guardar o nada faz a busca continuar morta depois de consertada."""
+        pesquisa = montar_pesquisa(PAGINA_VAZIA)
+        pesquisa.buscar("algo")
+        antes = len(pesquisa.transporte.chamadas)
+        pesquisa.buscar("algo")
+        self.assertGreater(len(pesquisa.transporte.chamadas), antes)
+
+
+class Conferencia(unittest.TestCase):
+    def test_conferir_roda_tudo_e_nao_para_no_primeiro_acerto(self):
+        pesquisa = montar_pesquisa(PAGINA_DDG)
+        relato = pesquisa.conferir("teste")
+        self.assertTrue(relato["alguma_funcionou"])
+        self.assertEqual(len(relato["tentativas"]), 4)
+        for linha in relato["tentativas"]:
+            self.assertIn("url", linha)
+            self.assertIn("bytes", linha)
+        self.assertTrue(relato["tentativas"][0]["primeira"].startswith("http"))
+
+    def test_conferir_com_busca_desligada_devolve_o_diagnostico(self):
+        relato = Pesquisa().conferir()
+        self.assertFalse(relato["disponivel"])
+        self.assertIn("desligada", relato["motivo"])
+        self.assertEqual(relato["tentativas"], [])
+
+
+class LigadaPorPadrao(unittest.TestCase):
+    """Um assistente que não consulta nada responde de memória com cara de certeza."""
+
+    def test_config_nova_ja_vem_com_busca(self):
+        from zeus.config import Config
+        self.assertEqual(Config().pesquisa_provedor, "duckduckgo")
+        self.assertTrue(Pesquisa(provedor=Config().pesquisa_provedor).disponivel())
+
+    def test_sem_fonte_a_ferramenta_entrega_o_motivo_ao_modelo(self):
+        from zeus.ferramentas import Ferramentas
+        with tempfile.TemporaryDirectory() as pasta:
+            store = Store(Path(pasta))
+            ferramentas = Ferramentas(store, pesquisa=montar_pesquisa(PAGINA_BLOQUEIO))
+            saida = ferramentas.executar("pesquisar", {"consulta": "algo"})
+            self.assertTrue(saida["sem_resultado"])
+            self.assertIn("unusual traffic", saida["instrucao"])
+            self.assertIn("motivo", saida["instrucao"])
+            store.connection.close()

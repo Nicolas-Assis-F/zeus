@@ -27,7 +27,12 @@ class Config:
     modelo_conversa: str = ""
     keep_alive: str = "30m"
     limite_de_resposta: int = 320
-    pesquisa_provedor: str = "nenhum"
+    # Ligada por padrão. Desligada, o Zeus não sabe nada do mundo depois do
+    # treino e responde de memória com cara de certeza — foi assim que ele
+    # pareceu burro na primeira conversa de verdade. Quem quiser um Zeus sem
+    # rede escreve "nenhum" aqui: é uma linha. A barreira contra página que
+    # tenta mandar continua valendo de qualquer jeito.
+    pesquisa_provedor: str = "duckduckgo"
     pesquisa_url: str = ""
     pesquisa_timeout: int = 10
     pesquisa_cache_minutos: int = 30
