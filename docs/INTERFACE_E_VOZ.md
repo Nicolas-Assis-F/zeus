@@ -193,6 +193,7 @@ Cada etapa falha sozinha, com o motivo e o que fazer. A etapa do microfone não
 se contenta em gravar: ela mede o nível do áudio, porque um arquivo de silêncio
 tem exatamente o mesmo tamanho de um com voz — e foi assim que "gravou" passou
 a parecer sucesso quando não era.
+
 ## Painel de saúde
 
 A HUD deixou de ser só a janela de conversa. O X99 roda sem monitor num canto
