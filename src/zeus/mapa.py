@@ -62,7 +62,10 @@ def tela_de_coordenada(lat: float, lon: float, zoom: int):
     x = (float(lon) + 180.0) / 360.0 * n
     radiano = math.radians(lat)
     y = (1.0 - math.asinh(math.tan(radiano)) / math.pi) / 2.0 * n
-    return x, y
+    # No limite do Mercator o arredondamento devolve -5e-11, que vira índice
+    # de tela -1 e recusa. Prender aqui evita transformar ponto flutuante em
+    # erro visível.
+    return x, min(max(y, 0.0), n)
 
 
 def coordenada_de_tela(x: float, y: float, zoom: int):

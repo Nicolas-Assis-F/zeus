@@ -57,6 +57,36 @@
   /* ---------------------------------------------------------------- mapa */
   #mapa{width:100%; height:224px; display:block}
   #legendaMapa{font-size:10.5px; color:var(--apagado); margin-top:6px; line-height:1.5}
+  .telaDoMapa{position:relative; width:100%; height:224px; overflow:hidden;
+              border-radius:9px; background:#0b0f16; cursor:grab; touch-action:none}
+  .telaDoMapa.arrastando{cursor:grabbing}
+  .telaDoMapa img{position:absolute; width:256px; height:256px; user-select:none;
+                  -webkit-user-drag:none; image-rendering:auto;
+                  filter:invert(1) hue-rotate(185deg) saturate(.55) brightness(.92) contrast(1.05)}
+  .telaDoMapa .pino{position:absolute; width:12px; height:12px; margin:-6px 0 0 -6px;
+                    border-radius:50% 50% 50% 0; transform:rotate(-45deg);
+                    background:var(--azul); box-shadow:0 0 0 2px rgba(7,8,12,.85)}
+  .telaDoMapa .pino.casa{background:var(--verde)}
+  .telaDoMapa .rotuloPino{position:absolute; transform:translate(-50%,-22px);
+                          font-size:10.5px; color:var(--texto); white-space:nowrap;
+                          background:rgba(7,8,12,.82); padding:1px 5px; border-radius:5px;
+                          border:1px solid var(--linha); pointer-events:none}
+  .telaDoMapa .credito{position:absolute; right:4px; bottom:3px; font-size:9px;
+                       color:var(--apagado); background:rgba(7,8,12,.6);
+                       padding:0 4px; border-radius:4px}
+  .telaDoMapa .aviso{position:absolute; inset:0; display:grid; place-items:center;
+                     text-align:center; font-size:11.5px; color:var(--apagado); padding:14px}
+  .ferramentasDoMapa{display:flex; gap:5px; margin-top:7px}
+  .ferramentasDoMapa button{height:24px; padding:0 8px; font-size:11px; border-radius:7px;
+                            color:var(--suave); background:var(--painel2)}
+  .ferramentasDoMapa input{flex:1; min-width:0; height:24px; padding:0 8px; font-size:11px;
+                           border-radius:7px; border:1px solid var(--linha);
+                           background:var(--painel2); color:var(--texto); outline:none}
+  #mapaGrande{position:fixed; inset:0; z-index:12; background:var(--fundo);
+              display:none; flex-direction:column; padding:12px}
+  #mapaGrande.aberto{display:flex}
+  #mapaGrande .telaDoMapa{flex:1; height:auto}
+  #mapaGrande header{display:flex; align-items:center; gap:10px; padding:0 2px 10px}
 
   /* ------------------------------------------------------------ conversa */
   #centro{display:flex; flex-direction:column; min-width:0; padding:0 18px}
@@ -165,12 +195,37 @@
   </div>
 
   <div class="cartao">
-    <h2>Mapa do Zeus <span class="valor" id="contaMapa">—</span></h2>
-    <canvas id="mapa" width="640" height="432"></canvas>
-    <p id="legendaMapa">Cada nó é uma capacidade. Aceso quer dizer verificada agora;
-       âmbar, presente mas sem confirmação; apagado, ausente.</p>
+    <div class="abas" id="abasMapa">
+      <button data-aba="sistema" class="sel">Sistema</button>
+      <button data-aba="local">Localização</button>
+      <span class="valor" id="contaMapa" style="margin-left:auto;font-size:10.5px;color:var(--apagado)">—</span>
+    </div>
+    <div class="painelAba sel" data-aba="sistema">
+      <canvas id="mapa" width="640" height="432"></canvas>
+      <p id="legendaMapa">Cada nó é uma capacidade. Aceso quer dizer verificada agora;
+         âmbar, presente mas sem confirmação; apagado, ausente.</p>
+    </div>
+    <div class="painelAba" data-aba="local">
+      <div class="telaDoMapa" id="telaLocal"></div>
+      <div class="ferramentasDoMapa">
+        <input id="buscaLugar" placeholder="rua, bairro, cidade…" autocomplete="off">
+        <button id="expandirMapa" title="Tela cheia">⤢</button>
+      </div>
+      <p id="legendaLocal" style="font-size:10.5px;color:var(--apagado);margin:6px 0 0">
+        Telas do OpenStreetMap, buscadas pelo Zeus e guardadas em disco: depois da
+        primeira olhada o mapa funciona sem rede.</p>
+    </div>
   </div>
 </aside>
+
+<div id="mapaGrande">
+  <header>
+    <b style="font-size:12px;letter-spacing:.16em;color:var(--suave)">LOCALIZAÇÃO</b>
+    <span id="coordGrande" style="font-size:11px;color:var(--apagado)"></span>
+    <button id="fecharMapa" style="margin-left:auto;height:30px">Fechar</button>
+  </header>
+  <div class="telaDoMapa" id="telaGrande"></div>
+</div>
 
 <!-- ============================================================== centro -->
 <main id="centro">
@@ -426,6 +481,200 @@ function ajustarTela(tela){
   const L = Math.round(r.width*dpr), A = Math.round(r.height*dpr);
   if (tela.width !== L || tela.height !== A){ tela.width = L; tela.height = A; }
   return {L, A, escala: dpr};
+}
+
+/* --------------------------------------------------- mapa de localização */
+/* Um mapa deslizante escrito à mão, em vez de biblioteca.
+
+   O motivo não é orgulho: o Zeus tem que funcionar com a internet caída, e
+   biblioteca de mapa vem de CDN ou de passo de build. São umas cem linhas —
+   a matemática é a projeção do Mercator, e o resto é posicionar imagem.
+
+   As telas vêm do próprio Zeus, nunca do servidor público direto. Ele busca
+   uma vez, guarda em disco e serve dali. O filtro CSS inverte a cor para o
+   mapa claro do OpenStreetMap combinar com o resto da tela, o que também
+   evita ter que hospedar um estilo escuro. */
+const LADO_DA_TELA = 256;
+
+function criarMapa(elemento, aoMover){
+  const estado = {lat: -16.6869, lon: -49.2648, zoom: 13, zoomMaximo: 19,
+                  pinos: [], vivo: false, aviso: ""};
+  const imagens = new Map();
+  let arrastando = null;
+
+  function paraTela(lat, lon, zoom){
+    const n = Math.pow(2, zoom);
+    const limitada = Math.max(-85.05112878, Math.min(85.05112878, lat));
+    const rad = limitada * Math.PI / 180;
+    return {x: (lon + 180) / 360 * n,
+            y: (1 - Math.asinh(Math.tan(rad)) / Math.PI) / 2 * n};
+  }
+  function deTela(x, y, zoom){
+    const n = Math.pow(2, zoom);
+    return {lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI,
+            lon: x / n * 360 - 180};
+  }
+
+  function desenhar(){
+    const L = elemento.clientWidth, A = elemento.clientHeight;
+    if (!L || !A) return;
+    if (estado.aviso){
+      elemento.innerHTML = '<div class="aviso">' + estado.aviso + "</div>";
+      return;
+    }
+    const centro = paraTela(estado.lat, estado.lon, estado.zoom);
+    const meio = {x: L/2, y: A/2};
+    const primeiroX = Math.floor(centro.x - meio.x / LADO_DA_TELA);
+    const primeiroY = Math.floor(centro.y - meio.y / LADO_DA_TELA);
+    const ultimoX = Math.floor(centro.x + meio.x / LADO_DA_TELA);
+    const ultimoY = Math.floor(centro.y + meio.y / LADO_DA_TELA);
+    const limite = Math.pow(2, estado.zoom);
+    const usadas = new Set();
+    for (let tx = primeiroX; tx <= ultimoX; tx++){
+      for (let ty = primeiroY; ty <= ultimoY; ty++){
+        if (ty < 0 || ty >= limite) continue;
+        const enrolado = ((tx % limite) + limite) % limite;   // o mundo dá a volta
+        const chave = estado.zoom + "/" + enrolado + "/" + ty;
+        usadas.add(chave + "@" + tx);
+        let img = imagens.get(chave + "@" + tx);
+        if (!img){
+          img = document.createElement("img");
+          img.loading = "lazy"; img.alt = "";
+          img.src = "/mapa/tela/" + chave + ".png?chave=" + encodeURIComponent(CHAVE);
+          img.onerror = () => { img.style.visibility = "hidden"; };
+          elemento.appendChild(img);
+          imagens.set(chave + "@" + tx, img);
+        }
+        img.style.left = Math.round(meio.x + (tx - centro.x) * LADO_DA_TELA) + "px";
+        img.style.top  = Math.round(meio.y + (ty - centro.y) * LADO_DA_TELA) + "px";
+      }
+    }
+    for (const [chave, img] of imagens){
+      if (!usadas.has(chave)){ img.remove(); imagens.delete(chave); }
+    }
+    for (const antigo of elemento.querySelectorAll(".pino,.rotuloPino,.credito")) antigo.remove();
+    for (const pino of estado.pinos){
+      const p = paraTela(pino.lat, pino.lon, estado.zoom);
+      const x = meio.x + (p.x - centro.x) * LADO_DA_TELA;
+      const y = meio.y + (p.y - centro.y) * LADO_DA_TELA;
+      if (x < -40 || y < -40 || x > L + 40 || y > A + 40) continue;
+      const marca = document.createElement("div");
+      marca.className = "pino" + (pino.casa ? " casa" : "");
+      marca.style.left = x + "px"; marca.style.top = y + "px";
+      marca.title = pino.nome || "";
+      elemento.appendChild(marca);
+      if (pino.nome && L > 320){
+        const rotulo = document.createElement("div");
+        rotulo.className = "rotuloPino";
+        rotulo.textContent = pino.nome.split(",").slice(0, 2).join(",");
+        rotulo.style.left = x + "px"; rotulo.style.top = y + "px";
+        elemento.appendChild(rotulo);
+      }
+    }
+    const credito = document.createElement("div");
+    credito.className = "credito";
+    credito.textContent = "© OpenStreetMap";
+    elemento.appendChild(credito);
+    if (aoMover) aoMover(estado);
+  }
+
+  elemento.addEventListener("pointerdown", (e) => {
+    arrastando = {x: e.clientX, y: e.clientY};
+    elemento.classList.add("arrastando");
+    elemento.setPointerCapture(e.pointerId);
+  });
+  elemento.addEventListener("pointermove", (e) => {
+    if (!arrastando) return;
+    const dx = e.clientX - arrastando.x, dy = e.clientY - arrastando.y;
+    arrastando = {x: e.clientX, y: e.clientY};
+    const centro = paraTela(estado.lat, estado.lon, estado.zoom);
+    const novo = deTela(centro.x - dx / LADO_DA_TELA, centro.y - dy / LADO_DA_TELA, estado.zoom);
+    estado.lat = novo.lat; estado.lon = novo.lon;
+    desenhar();
+  });
+  const soltar = (e) => { arrastando = null; elemento.classList.remove("arrastando"); };
+  elemento.addEventListener("pointerup", soltar);
+  elemento.addEventListener("pointercancel", soltar);
+  elemento.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const passo = e.deltaY < 0 ? 1 : -1;
+    const alvo = Math.max(2, Math.min(estado.zoomMaximo, estado.zoom + passo));
+    if (alvo === estado.zoom) return;
+    estado.zoom = alvo;
+    for (const img of imagens.values()) img.remove();
+    imagens.clear();
+    desenhar();
+  }, {passive: false});
+
+  return {
+    estado,
+    desenhar,
+    ir(lat, lon, zoom){
+      estado.lat = lat; estado.lon = lon;
+      if (zoom) estado.zoom = zoom;
+      for (const img of imagens.values()) img.remove();
+      imagens.clear();
+      desenhar();
+    },
+    marcar(pinos){ estado.pinos = pinos || []; desenhar(); },
+    avisar(texto){
+      estado.aviso = texto || "";
+      if (texto){ elemento.innerHTML = ""; imagens.clear(); }
+      desenhar();
+    },
+  };
+}
+
+let MAPA_LOCAL = null, MAPA_GRANDE = null, PINOS = [];
+
+async function ligarMapaLocal(){
+  MAPA_LOCAL = criarMapa($("telaLocal"));
+  try{
+    const r = await fetch("/mapa?chave=" + encodeURIComponent(CHAVE));
+    if (!r.ok) throw new Error(r.status);
+    const inicio = await r.json();
+    if (!inicio.ativo){
+      MAPA_LOCAL.avisar(inicio.situacao || "mapa desligado");
+      return;
+    }
+    MAPA_LOCAL.estado.zoomMaximo = inicio.zoom_maximo || 19;
+    PINOS = [{lat: inicio.lat, lon: inicio.lon, nome: "aqui", casa: true}];
+    MAPA_LOCAL.marcar(PINOS);
+    MAPA_LOCAL.ir(inicio.lat, inicio.lon, inicio.zoom);
+  }catch(e){
+    MAPA_LOCAL.avisar("Não consegui falar com o mapa do Zeus.");
+  }
+}
+
+/* A busca de lugar passa pelo próprio Zeus, que é quem tem o direito de falar
+   com o serviço público — e quem respeita o limite de um pedido por segundo. */
+async function procurarLugar(){
+  const campo = $("buscaLugar");
+  const termo = campo.value.trim();
+  if (termo.length < 2 || !MAPA_LOCAL) return;
+  campo.disabled = true;
+  try{
+    const r = await fetch("/mensagem?chave=" + encodeURIComponent(CHAVE), {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({texto: "onde fica " + termo})});
+    if (r.ok) escrever("nicolas", "onde fica " + termo);
+  }catch(e){ /* a conversa responde; o mapa recebe o pino pelo fluxo */ }
+  campo.disabled = false; campo.value = "";
+}
+
+function marcarLugares(lugares){
+  if (!lugares || !lugares.length || !MAPA_LOCAL) return;
+  const novos = lugares.map((l) => ({lat: l.lat, lon: l.lon, nome: l.nome}));
+  PINOS = PINOS.filter((p) => p.casa).concat(novos);
+  MAPA_LOCAL.marcar(PINOS);
+  MAPA_LOCAL.ir(novos[0].lat, novos[0].lon, Math.max(MAPA_LOCAL.estado.zoom, 15));
+  if (MAPA_GRANDE){ MAPA_GRANDE.marcar(PINOS); MAPA_GRANDE.ir(novos[0].lat, novos[0].lon); }
+  for (const b of $("abasMapa").children){
+    if (b.dataset) b.classList.toggle("sel", b.dataset.aba === "local");
+  }
+  for (const painel of document.querySelectorAll('.painelAba[data-aba="sistema"],.painelAba[data-aba="local"]'))
+    painel.classList.toggle("sel", painel.dataset.aba === "local");
+  MAPA_LOCAL.desenhar();
 }
 
 /* ------------------------------------------------------------ medidores */
@@ -819,6 +1068,39 @@ $("abas").addEventListener("click", (e) => {
   for (const p of document.querySelectorAll(".painelAba"))
     p.classList.toggle("sel", p.dataset.aba === alvo.dataset.aba);
 });
+$("abasMapa").addEventListener("click", (e) => {
+  const alvo = e.target.closest("button"); if (!alvo) return;
+  for (const b of $("abasMapa").children)
+    if (b.dataset && b.dataset.aba) b.classList.toggle("sel", b === alvo);
+  for (const painel of document.querySelectorAll('.painelAba[data-aba="sistema"],.painelAba[data-aba="local"]'))
+    painel.classList.toggle("sel", painel.dataset.aba === alvo.dataset.aba);
+  if (alvo.dataset.aba === "local" && MAPA_LOCAL) MAPA_LOCAL.desenhar();
+});
+$("buscaLugar").addEventListener("keydown", (e) => {
+  if (e.key === "Enter"){ e.preventDefault(); procurarLugar(); }
+});
+$("expandirMapa").onclick = () => {
+  $("mapaGrande").classList.add("aberto");
+  if (!MAPA_GRANDE){
+    MAPA_GRANDE = criarMapa($("telaGrande"), (s) => {
+      $("coordGrande").textContent = s.lat.toFixed(5) + ", " + s.lon.toFixed(5)
+                                     + "  ·  zoom " + s.zoom;
+    });
+  }
+  MAPA_GRANDE.estado.zoomMaximo = MAPA_LOCAL ? MAPA_LOCAL.estado.zoomMaximo : 19;
+  MAPA_GRANDE.marcar(PINOS);
+  if (MAPA_LOCAL) MAPA_GRANDE.ir(MAPA_LOCAL.estado.lat, MAPA_LOCAL.estado.lon,
+                                 MAPA_LOCAL.estado.zoom);
+};
+$("fecharMapa").onclick = () => $("mapaGrande").classList.remove("aberto");
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") $("mapaGrande").classList.remove("aberto");
+});
+window.addEventListener("resize", () => {
+  if (MAPA_LOCAL) MAPA_LOCAL.desenhar();
+  if (MAPA_GRANDE) MAPA_GRANDE.desenhar();
+});
+
 $("barraTopo").addEventListener("click", (e) => {
   const alvo = e.target.closest("button"); if (!alvo) return;
   for (const b of $("barraTopo").children) b.classList.toggle("sel", b === alvo);
@@ -837,6 +1119,7 @@ function abrirFluxo(){
     let pacote; try{ pacote = JSON.parse(evento.data); }catch(e){ return; }
     if (pacote.tipo === "estado"){ pintarEstado(pacote); }
     else if (pacote.tipo === "saude"){ pintarSaude(pacote); }
+    else if (pacote.tipo === "lugares"){ marcarLugares(pacote.lugares); }
     else if (pacote.tipo === "operacao"){
       pintarOperacao(pacote);
       listar("perguntas", pacote.perguntas, "nenhuma", p => [p.texto, p.situacao], "cPerguntas");
@@ -878,6 +1161,7 @@ function iniciar(){
   carregarEstado();
   abrirFluxo();
   lerSaude();
+  ligarMapaLocal();
   /* Fora de foco o painel para: a aba escondida não precisa de /proc, e o
      X99 tem coisa melhor a fazer do que servir medida para ninguém ver. */
   clearInterval(relogioDeSaude);

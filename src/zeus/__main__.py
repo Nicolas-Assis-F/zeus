@@ -614,6 +614,7 @@ def _executar(zeus, store, config):
             host=config.hud_host, porta=config.hud_porta,
             estado=retrato(store, config, voz, servido if modelo_ok else "", ouvidos),
             pasta_de_escuta=ouvidos.destino,
+            mapa=montar_mapa(config, estado_local),
             certificado=certificado, chave_tls=chave_tls)
         porta = hud.iniciar()
         esquema = "https" if hud.seguro else "http"
@@ -633,13 +634,24 @@ def _executar(zeus, store, config):
                      hora=datetime.now().strftime("%H:%M"))
         hud.atualizar(retrato(store, config, voz, servido if modelo_ok else "", ouvidos))
 
+    def contar_lugares():
+        """Quando o Zeus localiza algo, o mapa da interface vai junto."""
+        achados = getattr(zeus.ferramentas, "ultimos_lugares", None)
+        if hud is not None and achados:
+            hud.publicar("lugares", lugares=achados[:5])
+        if achados is not None:
+            zeus.ferramentas.ultimos_lugares = []
+
     def responder(texto, canal, em_fluxo=False):
         """Uma pergunta, uma resposta, a mesma identidade em qualquer canal."""
         if not modelo_ok:
             store.registrar_turno(canal, "nicolas", texto)
             return SEM_MODELO
         if not (em_fluxo and hud is not None):
-            return zeus.conversar(texto, canal=canal)
+            try:
+                return zeus.conversar(texto, canal=canal)
+            finally:
+                contar_lugares()
 
         def empurrar(pedaco):
             if pedaco is None:
@@ -647,7 +659,10 @@ def _executar(zeus, store, config):
             else:
                 hud.publicar("fluxo", pedaco=pedaco)
 
-        return zeus.conversar(texto, canal=canal, ao_receber=empurrar)
+        try:
+            return zeus.conversar(texto, canal=canal, ao_receber=empurrar)
+        finally:
+            contar_lugares()
 
     fala = FalaEmSegundoPlano(voz, hud.publicar) if hud is not None else None
     supervisor = SupervisorPresenca(estado_local, config, stopped, hud, operacao)

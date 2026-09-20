@@ -177,6 +177,9 @@ class Ferramentas:
         self.pesquisa = pesquisa
         self.acoes = acoes
         self.mapa = mapa
+        # A interface precisa saber que um lugar foi achado para mover o mapa.
+        # Guardar aqui evita que o núcleo tenha que entender de mapa.
+        self.ultimos_lugares = []
 
     def catalogo(self):
         return CATALOGO
@@ -280,7 +283,9 @@ class Ferramentas:
         if self.mapa is None or not self.mapa.ativo:
             motivo = self.mapa.diagnostico() if self.mapa else "mapa não configurado"
             return {"erro": f"Não posso localizar agora: {motivo}.", "externo": False}
-        return self.mapa.localizar(str(argumentos.get("lugar", "")))
+        resultado = self.mapa.localizar(str(argumentos.get("lugar", "")))
+        self.ultimos_lugares = list(resultado.get("lugares") or [])
+        return resultado
 
     # ------------------------------------------------- ações no computador
     def _acoes_ou_erro(self):
