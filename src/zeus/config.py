@@ -27,13 +27,25 @@ class Config:
     modelo_conversa: str = ""
     keep_alive: str = "30m"
     limite_de_resposta: int = 320
-    pesquisa_provedor: str = "nenhum"
+    # Ligada por padrão. Desligada, o Zeus não sabe nada do mundo depois do
+    # treino e responde de memória com cara de certeza — foi assim que ele
+    # pareceu burro na primeira conversa de verdade. Quem quiser um Zeus sem
+    # rede escreve "nenhum" aqui: é uma linha. A barreira contra página que
+    # tenta mandar continua valendo de qualquer jeito.
+    pesquisa_provedor: str = "duckduckgo"
     pesquisa_url: str = ""
     pesquisa_timeout: int = 10
     pesquisa_cache_minutos: int = 30
     pesquisa_max_fontes: int = 4
     pesquisa_max_bytes: int = 1_000_000
     pesquisa_max_paginas: int = 3
+    # Pastas que o Zeus pode olhar. Vazio desliga as ações no computador.
+    # A lista é dele por escolha de Nicolas, não por descoberta: o Zeus nunca
+    # sai procurando o que mais existe na máquina.
+    acoes_pastas: tuple = ()
+    acoes_abrir: bool = False
+    acoes_max_bytes: int = 200_000
+    acoes_max_itens: int = 200
     persona: str = "config/persona.md"
     hud_host: str = "0.0.0.0"
     hud_porta: int = 8770
