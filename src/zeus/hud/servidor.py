@@ -24,6 +24,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from ..saude import Saude
+
 PAGINA = Path(__file__).resolve().parent / "index.html"
 LIMITE_DE_MENSAGEM = 4000
 LIMITE_DE_AUDIO = 12 * 1024 * 1024
@@ -74,7 +76,8 @@ def garantir_certificado(diretorio: Path, ip: str = ""):
 class ServidorHUD:
     def __init__(self, enfileirar, voz=None, chave: str = "",
                  host: str = "0.0.0.0", porta: int = 8770, estado=None,
-                 pasta_de_escuta=None, certificado=None, chave_tls=None):
+                 pasta_de_escuta=None, certificado=None, chave_tls=None,
+                 saude=None):
         if not chave:
             raise ValueError("A HUD exige uma chave de acesso.")
         self.enfileirar = enfileirar    # callable(dict)
@@ -84,6 +87,9 @@ class ServidorHUD:
             self.pasta_de_escuta.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.certificado = certificado
         self.chave_tls = chave_tls
+        # O painel de saúde lê /proc a cada pedido: é barato e não toca o
+        # banco, então pode viver na thread do HTTP sem fila nem cache.
+        self.saude = saude if saude is not None else Saude(pasta_de_escuta)
         self.voz = voz
         self.chave = chave
         self.host = host
@@ -222,6 +228,8 @@ def _construir(hud: ServidorHUD):
                 return self._json(401, {"erro": "chave inválida"})
             if caminho == "/estado":
                 return self._json(200, hud.estado())
+            if caminho == "/saude":
+                return self._json(200, hud.saude.medir())
             if caminho == "/fluxo":
                 return self._fluxo()
             if caminho.startswith("/audio/"):
