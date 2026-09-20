@@ -92,6 +92,31 @@ def montar_pesquisa(config, estado):
                     destino=Path(estado) / "pesquisa")
 
 
+def persona_de(config):
+    return Persona.carregar(config.persona)
+
+
+def diagnostico_do_contexto(config, persona):
+    """Compara o tamanho do prompt com a janela pedida ao modelo.
+
+    O Ollama corta pela frente, em silêncio, quando o prompt não cabe. O que
+    vive na frente é a persona. Foi assim que o Zeus respondeu sem identidade
+    sem nada no log dizer por quê, então o `check` passa a dizer antes."""
+    import json as _json
+    from .ferramentas import CATALOGO
+    from .contexto import estimar_tokens
+    partes = persona.instrucao()
+    partes += "".join(m["content"] for m in persona.exemplos())
+    partes += _json.dumps(CATALOGO, ensure_ascii=False)
+    estimado = estimar_tokens(partes) + 400      # folga para memória e turnos
+    janela = getattr(config, "contexto_tokens", 8192)
+    situacao = "cabe" if estimado < janela * 0.8 else "apertado"
+    if estimado >= janela:
+        situacao = ("NÃO CABE: o modelo vai descartar o começo do prompt, que é "
+                    "a persona. Aumente contexto_tokens.")
+    return f"{situacao} ({estimado} tokens estimados para janela de {janela})"
+
+
 def montar_acoes(config, store=None):
     """As ações no computador existem só sobre as pastas que Nicolas apontou.
 
@@ -260,6 +285,7 @@ def main():
                  ouvidos=ouvidos.diagnostico(),
                  pesquisa=montar_pesquisa(config, args.state_dir.expanduser()).diagnostico(),
                  acoes=montar_acoes(config).diagnostico(),
+                 contexto=diagnostico_do_contexto(config, persona_de(config)),
                  hud="configurada" if config.chave_hud else "sem chave definida",
                  config=config.sem_segredos())
             return 0 if integrity == "ok" and modelo_verificado else 1

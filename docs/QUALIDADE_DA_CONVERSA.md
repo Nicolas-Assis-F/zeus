@@ -109,3 +109,60 @@ automático: ela roda só com `--real`, porque com dublê o texto é fixo e não
 nada sobre tom. Os passos verificam que guardar um fato e pesquisar acontecem
 sem pedir licença, e que abrir algo na tela — a única ação com efeito fora da
 conversa — continua sendo confirmada antes.
+
+## O robô que era corte silencioso de prompt
+
+Depois de ajustar a persona, Nicolas disse de novo: "ele ainda tá muito
+robótico". A persona não era o problema — ela nem chegava ao modelo.
+
+O Ollama usa uma janela de contexto padrão quando ninguém pede outra, e ela é
+pequena: 2048 tokens em boa parte das instalações. Quando o prompt não cabe,
+ele **corta pela frente, em silêncio**. Não há erro, não há aviso no log, a
+resposta chega normalmente. O que vive na frente do prompt é exatamente a
+persona.
+
+A conta:
+
+```
+instrução da persona    ~1190 tokens
+exemplos de voz          ~360 tokens
+catálogo de ferramentas ~1280 tokens   (13 ferramentas)
+contexto e memória       ~200 tokens
+                        ------------
+                        ~3030 tokens
+```
+
+Com 2048 de janela, quase mil tokens eram descartados do começo a cada
+mensagem. Sobrava um assistente genérico com uma lista de ferramentas — que é
+precisamente a descrição de "parece um bot qualquer".
+
+`contexto_tokens` agora vai explícito no pedido, com 8192 de padrão, e
+`./zeus check` mostra a conta antes de a conversa acontecer:
+
+```
+"contexto": "cabe (3161 tokens estimados para janela de 8192)"
+```
+
+Se algum dia o catálogo crescer a ponto de não caber, o `check` diz isso com
+todas as letras em vez de deixar a persona sumir de novo.
+
+### Duas causas menores, no mesmo lugar
+
+**O prompt tinha metatexto.** O `persona.md` começava com "Arquivo editável,
+fora do código. Mudar o texto muda a conversa sem novo deploy", e trazia a
+seção "Exemplos de voz" explicando que os pares viram turnos reais. O modelo lê
+o prompt inteiro como instrução: texto que fala *sobre* a persona, em registro
+de documentação, ensina a responder como documentação. Agora tudo antes da
+primeira seção `##` e a seção de exemplos ficam fora do que o modelo recebe —
+sem perder os exemplos, que continuam entrando como turnos de verdade.
+
+**A amostragem era só temperatura.** `top_p`, `top_k` e `repeat_penalty` iam
+com o padrão do servidor. Sem penalidade de repetição, um modelo de 8B cai nas
+mesmas construções resposta após resposta, e repetição lida em sequência é
+metade da sensação de robô.
+
+**E a última linha do prompt era inventário.** O bloco terminava listando
+capacidades — "Sem câmera, sem dispositivo, sem ligação" — logo antes da
+mensagem de Nicolas. Num modelo pequeno, a última linha é a que mais pesa no
+registro. Agora, depois do relógio, vem uma linha fixa que devolve a voz: ela
+não muda de turno para turno, então não custa cache nenhum.

@@ -60,6 +60,17 @@ class Config:
     escuta_beam: int = 1
     escuta_silencio_ms: int = 500
     escuta_vocabulario: str = ""
+    # O Ollama assume 2048 tokens de contexto quando ninguém diz o contrário, e
+    # corta o prompt pela frente sem avisar. A persona vive no começo, então o
+    # que ele descartava era justamente a identidade -- e sobrava um assistente
+    # genérico. Com 13 ferramentas no catálogo o prompt passa de 2900 tokens, o
+    # que fazia isso acontecer em toda conversa.
+    contexto_tokens: int = 8192
+    # Amostragem. Temperatura sozinha não tira a rigidez: sem penalidade de
+    # repetição o modelo pequeno cai nas mesmas construções toda resposta.
+    topo_p: float = 0.92
+    topo_k: int = 40
+    penalidade_de_repeticao: float = 1.15
     temperatura_conversa: float = 0.75
     temperatura_decisao: float = 0.0
     turnos_de_conversa: int = 12

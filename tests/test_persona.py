@@ -29,7 +29,13 @@ class CarregamentoDaPersona(unittest.TestCase):
                                            "estado": "confirmado"}],
                                    agora=em(2026, 9, 18, 20, 30))
         linhas = [linha for linha in contexto.splitlines() if linha.strip()]
-        self.assertTrue(linhas[-1].startswith("Momento atual:"))
+        # O relógio é a última linha que muda a cada turno: nada volátil pode
+        # vir antes dele, senão o prefixo estável quebra e o servidor
+        # reprocessa a persona inteira a cada mensagem.
+        self.assertTrue(linhas[-2].startswith("Momento atual:"))
+        # Depois dele vem uma única linha fixa, que reancora a voz. Ser fixa é
+        # o que a deixa sair de graça: ela não muda de turno para turno.
+        self.assertTrue(linhas[-1].startswith("Agora responda como Zeus fala"))
         self.assertTrue(contexto.startswith("Você é Zeus."))
 
 
@@ -87,3 +93,50 @@ class PersonaQueAge(unittest.TestCase):
         anterior = Path("avaliacao/personas/anterior.md")
         self.assertTrue(anterior.exists())
         self.assertIn("persona-cega", anterior.read_text(encoding="utf-8"))
+
+
+class PromptSemMetatexto(unittest.TestCase):
+    """O modelo lê o prompt inteiro como instrução.
+
+    Uma linha explicando que o arquivo é editável, ou que os pares de fala
+    viram turnos reais, ensina o registro de documento técnico — e a resposta
+    sai com cara de documentação. Foi parte do "ainda muito robótico"."""
+
+    def setUp(self):
+        self.persona = Persona.carregar("config/persona.md")
+
+    def test_o_aviso_sobre_o_arquivo_nao_vai_para_o_modelo(self):
+        instrucao = self.persona.instrucao()
+        self.assertIn("editável", self.persona.texto)
+        self.assertNotIn("editável", instrucao)
+        self.assertNotIn("sem novo deploy", instrucao)
+
+    def test_a_secao_que_explica_os_exemplos_sai_inteira(self):
+        instrucao = self.persona.instrucao()
+        self.assertNotIn("Exemplos de voz", instrucao)
+        self.assertNotIn("Edite à vontade", instrucao)
+
+    def test_mas_os_exemplos_continuam_chegando_como_turnos(self):
+        """Tirar a explicação não pode tirar a voz junto."""
+        exemplos = self.persona.exemplos()
+        self.assertGreaterEqual(len(exemplos), 10)
+        self.assertIn("Opa", exemplos[1]["content"])
+
+    def test_a_instrucao_comeca_na_primeira_secao(self):
+        self.assertTrue(self.persona.instrucao().startswith("## Identidade"))
+
+    def test_as_secoes_de_comportamento_continuam_inteiras(self):
+        instrucao = self.persona.instrucao()
+        for esperado in ("## Identidade", "## Como você fala",
+                         "## Agir, e depois contar", "## Limites que você respeita"):
+            self.assertIn(esperado, instrucao)
+
+    def test_persona_sem_secao_nenhuma_vale_inteira(self):
+        """A persona mínima embutida é uma frase só; não há o que separar."""
+        curta = Persona("Você é Zeus.", "teste")
+        self.assertEqual(curta.instrucao(), "Você é Zeus.")
+
+    def test_comentario_de_html_nao_chega_ao_modelo(self):
+        com_nota = Persona("## Voz\n<!-- lembrar de revisar -->\nFale curto.", "teste")
+        self.assertNotIn("revisar", com_nota.instrucao())
+        self.assertIn("Fale curto.", com_nota.instrucao())

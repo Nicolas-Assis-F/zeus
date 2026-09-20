@@ -145,7 +145,9 @@ class ProvedorOllama:
     nome = "ollama"
 
     def __init__(self, url: str, modelo: str, transporte=None, timeout=TEMPO_LIMITE,
-                 keep_alive: str = "30m", limite_de_resposta: int = 320):
+                 keep_alive: str = "30m", limite_de_resposta: int = 320,
+                 contexto_tokens: int = 8192, topo_p: float = 0.92,
+                 topo_k: int = 40, penalidade_de_repeticao: float = 1.15):
         self.url = url.rstrip("/")
         self.modelo = modelo
         self.transporte = transporte or transporte_http
@@ -155,7 +157,23 @@ class ProvedorOllama:
         # A 9,8 tokens por segundo, resposta longa é espera longa. O teto corta
         # a divagação antes de ela virar um minuto de silêncio no Telegram.
         self.limite_de_resposta = limite_de_resposta
+        # Sem num_ctx explícito o Ollama usa 2048 e descarta o começo do prompt
+        # em silêncio. O começo é a persona; o fim é a mensagem. Cortar pela
+        # frente significa responder sem identidade nenhuma, que foi o que
+        # Nicolas sentiu como "robô".
+        self.contexto_tokens = contexto_tokens
+        self.topo_p = topo_p
+        self.topo_k = topo_k
+        self.penalidade_de_repeticao = penalidade_de_repeticao
         self.transporte_de_fluxo = transporte_fluxo
+
+    def _opcoes(self, temperatura):
+        return {"temperature": temperatura,
+                "num_predict": self.limite_de_resposta,
+                "num_ctx": self.contexto_tokens,
+                "top_p": self.topo_p,
+                "top_k": self.topo_k,
+                "repeat_penalty": self.penalidade_de_repeticao}
 
     def verificar(self) -> str:
         dados = self.transporte("GET", f"{self.url}/api/tags", None, None, self.timeout)
@@ -174,8 +192,7 @@ class ProvedorOllama:
             "messages": mensagens,
             "stream": False,
             "keep_alive": self.keep_alive,
-            "options": {"temperature": temperatura,
-                        "num_predict": self.limite_de_resposta},
+            "options": self._opcoes(temperatura),
         }
         if ferramentas:
             corpo["tools"] = ferramentas
@@ -201,8 +218,7 @@ class ProvedorOllama:
             "messages": mensagens,
             "stream": True,
             "keep_alive": self.keep_alive,
-            "options": {"temperature": temperatura,
-                        "num_predict": self.limite_de_resposta},
+            "options": self._opcoes(temperatura),
         }
         if ferramentas:
             corpo["tools"] = ferramentas
@@ -405,20 +421,32 @@ class ProvedorHibrido:
         return self.local.mensagem_de_ferramenta(chamada, conteudo)
 
 
+def _ollama(config, transporte=None):
+    """Um lugar só para montar o Ollama.
+
+    Eram duas construções quase iguais, e um parâmetro novo entrava numa e
+    esquecia a outra. Foi assim que o híbrido ficaria sem num_ctx enquanto o
+    modo local tinha."""
+    return ProvedorOllama(
+        config.ollama_url, config.modelo, transporte,
+        keep_alive=config.keep_alive,
+        limite_de_resposta=config.limite_de_resposta,
+        contexto_tokens=getattr(config, "contexto_tokens", 8192),
+        topo_p=getattr(config, "topo_p", 0.92),
+        topo_k=getattr(config, "topo_k", 40),
+        penalidade_de_repeticao=getattr(config, "penalidade_de_repeticao", 1.15))
+
+
 def criar_provedor(config, transporte=None):
     if config.provedor == "ollama":
-        return ProvedorOllama(config.ollama_url, config.modelo, transporte,
-                              keep_alive=config.keep_alive,
-                              limite_de_resposta=config.limite_de_resposta)
+        return _ollama(config, transporte)
     if config.provedor == "openrouter":
         return ProvedorOpenRouter(config.openrouter_url, config.modelo,
                                   config.openrouter_chave, transporte)
     if config.provedor == "hibrido":
         if not config.modelo_conversa:
             raise ErroDeModelo("O híbrido precisa de modelo_conversa configurado.")
-        local = ProvedorOllama(config.ollama_url, config.modelo, transporte,
-                               keep_alive=config.keep_alive,
-                               limite_de_resposta=config.limite_de_resposta)
+        local = _ollama(config, transporte)
         remoto = ProvedorOpenRouter(config.openrouter_url, config.modelo_conversa,
                                     config.openrouter_chave, transporte)
         return ProvedorHibrido(local, remoto)

@@ -53,3 +53,48 @@ class VerificacaoDeModelo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JanelaDeContexto(unittest.TestCase):
+    """O Ollama assume 2048 tokens quando ninguém diz o contrário, e corta o
+    prompt pela frente sem avisar. O começo do prompt é a persona: com 13
+    ferramentas no catálogo o prompt passa de 2900 tokens, então a identidade
+    era descartada em toda conversa e a resposta saía genérica."""
+
+    def _capturar(self):
+        enviados = []
+
+        def transporte(metodo, url, corpo=None, cabecalhos=None, timeout=None):
+            enviados.append(corpo)
+            return {"model": "m", "message": {"content": "oi"}}
+
+        from zeus.llm import ProvedorOllama
+        provedor = ProvedorOllama("http://x", "m", transporte, contexto_tokens=8192)
+        provedor.conversar([{"role": "user", "content": "opa"}], None, 0.7)
+        return enviados[0]["options"]
+
+    def test_a_janela_vai_explicita_no_pedido(self):
+        self.assertEqual(self._capturar()["num_ctx"], 8192)
+
+    def test_a_amostragem_nao_e_so_temperatura(self):
+        """Sem penalidade de repetição o modelo pequeno repete construção."""
+        opcoes = self._capturar()
+        self.assertEqual(opcoes["temperature"], 0.7)
+        self.assertEqual(opcoes["repeat_penalty"], 1.15)
+        self.assertIn("top_p", opcoes)
+        self.assertIn("top_k", opcoes)
+
+    def test_o_hibrido_monta_o_local_com_as_mesmas_opcoes(self):
+        """Eram duas construções quase iguais; um parâmetro novo entrava numa
+        e esquecia a outra."""
+        from zeus.llm import criar_provedor
+        from apoio import config_de_teste
+        config = config_de_teste()
+        config.provedor = "hibrido"
+        config.modelo_conversa = "remoto/modelo"
+        config.openrouter_chave = "chave"
+        config.contexto_tokens = 4096
+        hibrido = criar_provedor(config, lambda *a, **k: {})
+        self.assertEqual(hibrido.local.contexto_tokens, 4096)
+        self.assertEqual(hibrido.local.penalidade_de_repeticao,
+                         config.penalidade_de_repeticao)
