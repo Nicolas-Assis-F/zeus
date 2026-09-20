@@ -85,6 +85,8 @@ def montar_pesquisa(config, estado):
                     timeout=config.pesquisa_timeout,
                     cache_minutos=config.pesquisa_cache_minutos,
                     maximo_de_fontes=config.pesquisa_max_fontes,
+                    maximo_de_bytes=config.pesquisa_max_bytes,
+                    maximo_de_paginas=config.pesquisa_max_paginas,
                     destino=Path(estado) / "pesquisa")
 
 

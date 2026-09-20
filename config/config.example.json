@@ -24,6 +24,8 @@
   "pesquisa_provedor": "nenhum",
   "pesquisa_url": "",
   "pesquisa_max_fontes": 4,
+  "pesquisa_max_paginas": 3,
+  "pesquisa_max_bytes": 1000000,
   "persona": "config/persona.md",
   "temperatura_conversa": 0.75,
   "temperatura_decisao": 0.0,

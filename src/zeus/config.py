@@ -32,6 +32,8 @@ class Config:
     pesquisa_timeout: int = 10
     pesquisa_cache_minutos: int = 30
     pesquisa_max_fontes: int = 4
+    pesquisa_max_bytes: int = 1_000_000
+    pesquisa_max_paginas: int = 3
     persona: str = "config/persona.md"
     hud_host: str = "0.0.0.0"
     hud_porta: int = 8770

@@ -162,11 +162,15 @@ class PaginaNaoManda(unittest.TestCase):
 
             zeus.conversar("o que dizem sobre isso?")
 
-            # A memória continua de pé: a chamada da segunda rodada não existiu.
+            # A memória continua de pé: a chamada da segunda rodada foi recusada.
             self.assertIsNotNone(store.recall("tratamento"))
-            # E ela não existiu porque o catálogo saiu da conversa.
-            self.assertIsNotNone(provedor.catalogos[0])
-            self.assertIsNone(provedor.catalogos[1])
+            # A 1ª rodada tinha o catálogo inteiro; a 2ª, depois de dado externo
+            # entrar, só as ferramentas de leitura — nenhuma que muda estado.
+            nomes_rodada1 = {f["function"]["name"] for f in provedor.catalogos[0]}
+            self.assertIn("esquecer_fato", nomes_rodada1)
+            nomes_rodada2 = {f["function"]["name"] for f in provedor.catalogos[1]}
+            self.assertEqual(nomes_rodada2, {"pesquisar", "ler_pagina"})
+            self.assertNotIn("esquecer_fato", nomes_rodada2)
             store.close()
 
     def test_moldura_avisa_que_aquilo_e_dado_e_nao_instrucao(self):

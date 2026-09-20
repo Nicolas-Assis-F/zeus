@@ -98,9 +98,12 @@ class Zeus:
         leu_de_fora = False
         em_fluxo = ao_receber is not None and hasattr(self.provedor, "conversar_em_fluxo")
         for _ in range(MAXIMO_DE_RODADAS):
-            # Depois que dado de fora entra, a rodada seguinte acontece sem
-            # catálogo. Não é confiança no modelo: é a ferramenta não existir.
-            catalogo = None if leu_de_fora else self.ferramentas.catalogo()
+            # Depois que dado de fora entra, a conversa segue só com as
+            # ferramentas de leitura: o Zeus pode abrir outra página para
+            # conferir, mas nada que mude estado é sequer oferecido. Não é
+            # confiança no modelo — é a ferramenta de ação não estar mais na mesa.
+            catalogo = (self.ferramentas.catalogo_de_leitura() if leu_de_fora
+                        else self.ferramentas.catalogo())
             if em_fluxo:
                 resposta = self.provedor.conversar_em_fluxo(
                     mensagens,
@@ -120,9 +123,12 @@ class Zeus:
                 ao_receber(None)  # o que foi mostrado era rascunho
             mensagens.append(self.provedor.mensagem_do_assistente(resposta))
             for chamada in resposta.chamadas:
-                if leu_de_fora:
+                acao_apos_externo = (leu_de_fora and chamada["nome"]
+                                     not in self.ferramentas.NOMES_DE_LEITURA)
+                if acao_apos_externo:
                     # Esconder o catálogo não basta: um modelo pequeno emite a
-                    # chamada mesmo sem ela ofertada. Quem recusa é o executor.
+                    # chamada mesmo sem ela ofertada. Quem recusa é o executor —
+                    # e recusa tudo que muda estado depois de dado externo entrar.
                     resultado = {"erro": RECUSA_APOS_EXTERNO}
                 else:
                     resultado = self.ferramentas.executar(chamada["nome"],
