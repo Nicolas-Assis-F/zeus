@@ -18,6 +18,7 @@ from pathlib import Path
 from threading import Event, Thread
 
 from . import __version__
+from .acoes import Acoes
 from .config import carregar as carregar_config
 from .ferramentas import Ferramentas
 from .execucao import (CaixaDeEntrada, FalaEmSegundoPlano, RecepcaoTelegram,
@@ -70,7 +71,8 @@ def montar(args):
     store = Store(args.state_dir.expanduser())
     persona = Persona.carregar(config.persona)
     pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
-    ferramentas = Ferramentas(store, pesquisa=pesquisa)
+    ferramentas = Ferramentas(store, pesquisa=pesquisa,
+                              acoes=montar_acoes(config, store))
     canal = None
     if config.canal_configurado:
         from .canais import CanalTelegram
@@ -88,6 +90,25 @@ def montar_pesquisa(config, estado):
                     maximo_de_bytes=config.pesquisa_max_bytes,
                     maximo_de_paginas=config.pesquisa_max_paginas,
                     destino=Path(estado) / "pesquisa")
+
+
+def montar_acoes(config, store=None):
+    """As ações no computador existem só sobre as pastas que Nicolas apontou.
+
+    O registro vai para `eventos`: toda vez que o Zeus olhou alguma coisa fica
+    escrito, e `./zeus agenda` e a HUD mostram. Confiança que não deixa rastro
+    não é confiança, é esquecimento."""
+    def registrar(acao, alvo, resumo):
+        episodio = store.abrir_episodio("acao_no_computador", f"{acao}: {alvo}"[:300])
+        store.registrar_evento(episodio, "acoes", acao,
+                               {"alvo": alvo[:500], "resumo": resumo})
+        store.fechar_episodio(episodio, resumo[:200])
+
+    return Acoes(raizes=tuple(config.acoes_pastas or ()),
+                 maximo_de_bytes=config.acoes_max_bytes,
+                 maximo_de_itens=config.acoes_max_itens,
+                 permitir_abrir=bool(config.acoes_abrir),
+                 registrar=registrar if store is not None else None)
 
 
 def montar_voz(config):
@@ -238,6 +259,7 @@ def main():
                  modelo=modelo, canal=canal, voz=voz.diagnostico(),
                  ouvidos=ouvidos.diagnostico(),
                  pesquisa=montar_pesquisa(config, args.state_dir.expanduser()).diagnostico(),
+                 acoes=montar_acoes(config).diagnostico(),
                  hud="configurada" if config.chave_hud else "sem chave definida",
                  config=config.sem_segredos())
             return 0 if integrity == "ok" and modelo_verificado else 1
