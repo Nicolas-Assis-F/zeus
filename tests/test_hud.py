@@ -82,6 +82,28 @@ class Servidor(unittest.TestCase):
         self.assertEqual(self.pedir("/mapa")[0], 503)
         self.assertEqual(self.pedir("/mapa/tela/1/0/0.png")[0], 503)
 
+    def test_a_pagina_nao_manda_imagem_da_camera_para_lugar_nenhum(self):
+        """A promessa dos gestos é que o vídeo não sai do navegador.
+
+        É uma promessa que só vale se ninguém, um dia, acrescentar um envio
+        por engano. Este teste lê a página atrás disso."""
+        from zeus.hud.servidor import PAGINA
+        pagina = PAGINA.read_text(encoding="utf-8")
+        for proibido in ("toBlob", "toDataURL", "canvas.toDataURL",
+                         "MediaRecorder(TRILHA_DE_VIDEO", "/visao", "/camera"):
+            self.assertNotIn(proibido, pagina, proibido)
+        # O único envio de mídia que existe é o do áudio da escuta, que é
+        # explícito, com botão próprio, e vai para a transcrição local.
+        self.assertEqual(pagina.count("/escuta?chave="), 1)
+
+    def test_a_camera_comeca_desligada_e_avisa_enquanto_estiver_ligada(self):
+        from zeus.hud.servidor import PAGINA
+        pagina = PAGINA.read_text(encoding="utf-8")
+        self.assertIn("let CAMERA = null", pagina)
+        self.assertIn("luzDaCamera", pagina)
+        # Aba escondida com a câmera ligada é o que ninguém quer ver.
+        self.assertIn("document.hidden && CAMERA", pagina)
+
     def test_mensagem_entra_na_fila_do_laco_principal(self):
         self.assertEqual(self.pedir("/mensagem", {"texto": "bom dia"})[0], 202)
         self.assertEqual(self.recebidas, [{"tipo": "texto", "texto": "bom dia"}])
