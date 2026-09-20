@@ -11,6 +11,15 @@ from pathlib import Path
 from .contexto import linha_do_fato, selecionar
 
 FALA = re.compile(r"^-\s*(nicolas|zeus)\s*:\s*(.+)$", re.IGNORECASE)
+CABECALHO = re.compile(r"^##\s+(.+?)\s*$")
+COMENTARIO_HTML = re.compile(r"<!--.*?-->", re.DOTALL)
+
+# Seções do arquivo que falam *sobre* a persona, e não *como* a persona. O
+# modelo lê o prompt inteiro como instrução: uma linha explicando que o arquivo
+# é editável e que os pares viram turnos reais ensina o registro de documento
+# técnico, e a resposta sai com cara de documentação. Os exemplos em si não se
+# perdem -- eles entram como turnos de verdade, por `exemplos()`.
+SECOES_DE_NOTA = {"exemplos de voz"}
 
 PERSONA_MINIMA = (
     "Você é Zeus, presença pessoal e persistente na casa de Nicolas. "
@@ -69,9 +78,29 @@ class Persona:
         return mensagens
 
     def instrucao(self) -> str:
-        """Prefixo estável; exemplos seguem como mensagens, uma única vez."""
-        return "\n".join(l for l in self.texto.splitlines()
-                         if not FALA.match(l.strip())).strip()
+        """O que o modelo lê como instrução, sem o que é nota para humano.
+
+        Tudo antes do primeiro `##` é apresentação do arquivo — título e aviso
+        de que ele é editável — e não é instrução para ninguém. As seções de
+        nota saem inteiras. Os pares de fala saem daqui porque entram como
+        turnos reais em `exemplos()`."""
+        linhas, guardando, achou_secao = [], False, False
+        for linha in COMENTARIO_HTML.sub("", self.texto).splitlines():
+            cabecalho = CABECALHO.match(linha.strip())
+            if cabecalho:
+                achou_secao = True
+                guardando = cabecalho.group(1).strip().lower() not in SECOES_DE_NOTA
+            if not guardando:
+                continue
+            if FALA.match(linha.strip()):
+                continue
+            linhas.append(linha)
+        if not achou_secao:
+            # Persona sem seção nenhuma (a mínima embutida, por exemplo) vale
+            # inteira: não há o que separar.
+            return "\n".join(l for l in self.texto.splitlines()
+                              if not FALA.match(l.strip())).strip()
+        return "\n".join(linhas).strip()
 
     def sistema(self, fatos=None, perguntas=None, agenda=None, agora=None,
                 capacidades=None, incluir_persona=True, mensagem: str = "",
@@ -134,4 +163,12 @@ class Persona:
                           "contexto por orçamento. Se precisar de um, consulte pela chave.")
         if agora is not None:
             partes.append(f"Momento atual: {agora.astimezone().strftime('%d/%m/%Y %H:%M')}.")
+        if incluir_persona:
+            # A última linha antes da mensagem é a que mais pesa no registro de
+            # um modelo pequeno. Tudo acima dela é inventário -- memória,
+            # pendências, capacidades -- e inventário lido por último produz
+            # resposta com cara de inventário. Esta linha devolve a voz.
+            partes.append("")
+            partes.append("Agora responda como Zeus fala: curto, vivo, direto, "
+                          "sem repetir o que ele disse e sem listar o que você é.")
         return {"texto": "\n".join(partes), "escolha": escolha}

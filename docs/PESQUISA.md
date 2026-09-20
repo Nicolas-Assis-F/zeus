@@ -14,6 +14,12 @@ ainda não garante que toda afirmação gerada pelo modelo esteja correta.
 
 ## Ligar
 
+A pesquisa vem ligada, com o DuckDuckGo. Foi o contrário até setembro de 2026,
+e o resultado foi um Zeus que respondia de memória com cara de certeza sobre
+coisas que não sabia. Para desligar, `"pesquisa_provedor": "nenhum"` — é uma
+linha, e a barreira contra página que tenta mandar continua valendo de
+qualquer jeito.
+
 A pesquisa é escolha explícita. Desligada, a ferramenta recusa e diz como
 habilitar, em vez de sair pela rede por conta própria.
 
@@ -108,3 +114,48 @@ dinheiro exigirá configuração explícita, como este exige.
 O cache evita repetir a consulta por trinta minutos enquanto o processo está
 ativo. Uma cópia do resultado é gravada no diretório de estado, mas ainda não
 é recarregada no reinício. Resultados antigos em disco não voltam ao contexto.
+
+
+## Quando a busca devolve zero fonte
+
+Zero fonte tem dois significados opostos: ou a resposta não existe, ou o Zeus
+está cego. Do lado de fora os dois se parecem, e foi exatamente assim que a
+busca ficou quebrada sem ninguém perceber.
+
+Agora cada busca tenta quatro pedidos em ordem — o endereço em HTML por POST e
+por GET, depois o endereço `lite` pelos dois — e para no primeiro que trouxer
+fonte. O formulário do buscador é POST; pedir por GET funciona às vezes e
+devolve página vazia noutras, que é o pior dos dois mundos: sem erro e sem
+resultado.
+
+A leitura da página também tenta três formas, da mais rica para a mais teimosa.
+A última não depende de classe CSS nenhuma: procura o próprio redirecionador
+do buscador, que é a parte que menos muda. Vem sem resumo, mas com título e
+endereço — e título e endereço já sustentam uma resposta com fonte.
+
+Quando nada disso dá certo, o resultado carrega `motivo`, que diz qual foi o
+caso: página de recusa (`unusual traffic`, captcha), marcação mudou (com a
+contagem de âncoras de resultado encontradas), página quase vazia, ou exigência
+de JavaScript. Esse motivo chega até o modelo, para o Zeus poder dizer *por que*
+não achou em vez de só não achar.
+
+Falha de rede continua levantando recusa, e não vira "não encontrei nada". A
+diferença entre as duas é a diferença entre estar mudo e estar mentindo.
+
+Resultado vazio não entra no cache. Guardar o nada por meia hora fazia cada
+nova tentativa devolver o mesmo nada sem nem sair da máquina — o jeito de a
+busca continuar morta depois de consertada.
+
+### Descobrir onde parou
+
+```
+./zeus pesquisar "primeiro presidente do brasil" --diagnostico
+```
+
+Roda a cadeia inteira sem parar no primeiro acerto e imprime, por tentativa: o
+endereço, o método, quantos bytes voltaram, quantas fontes saíram e qual forma
+de marcação casou. Uma execução responde a pergunta, em vez de trocar palpite
+por palpite.
+
+Com `--cru`, a busca normal mostra o começo da página recebida quando não achou
+nada.

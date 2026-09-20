@@ -176,6 +176,24 @@ início e parada explícitos e limite de 60 segundos na interface.
 
 Referência: [faster-whisper](https://github.com/SYSTRAN/faster-whisper).
 
+## Autoteste de voz e escuta
+
+"A voz não funciona" tem pelo menos seis causas, e de fora todas parecem
+iguais: binário errado no PATH (o Ubuntu tem um `piper` que configura mouse),
+modelo ausente, caminho com erro de digitação, microfone mudo, pacote de escuta
+faltando, áudio sem saída.
+
+```bash
+./deploy/testar-voz.sh            # usa o microfone padrão
+./deploy/testar-voz.sh --listar   # mostra os microfones, inclusive o da webcam
+./deploy/testar-voz.sh --fonte alsa_input.usb-...
+```
+
+Cada etapa falha sozinha, com o motivo e o que fazer. A etapa do microfone não
+se contenta em gravar: ela mede o nível do áudio, porque um arquivo de silêncio
+tem exatamente o mesmo tamanho de um com voz — e foi assim que "gravou" passou
+a parecer sucesso quando não era.
+
 ## Painel de saúde
 
 A HUD deixou de ser só a janela de conversa. O X99 roda sem monitor num canto

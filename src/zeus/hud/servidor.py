@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from ..mapa import MapaIndisponivel
 from ..saude import Saude
 
 PAGINA = Path(__file__).resolve().parent / "index.html"
@@ -77,7 +78,7 @@ class ServidorHUD:
     def __init__(self, enfileirar, voz=None, chave: str = "",
                  host: str = "0.0.0.0", porta: int = 8770, estado=None,
                  pasta_de_escuta=None, certificado=None, chave_tls=None,
-                 saude=None):
+                 saude=None, mapa=None):
         if not chave:
             raise ValueError("A HUD exige uma chave de acesso.")
         self.enfileirar = enfileirar    # callable(dict)
@@ -90,6 +91,10 @@ class ServidorHUD:
         # O painel de saúde lê /proc a cada pedido: é barato e não toca o
         # banco, então pode viver na thread do HTTP sem fila nem cache.
         self.saude = saude if saude is not None else Saude(pasta_de_escuta)
+        # O navegador nunca fala com o servidor de telas: ele pede ao Zeus, que
+        # busca uma vez e guarda. Assim o mapa funciona sem rede depois da
+        # primeira olhada, e só um agente aparece no servidor público.
+        self.mapa = mapa
         self.voz = voz
         self.chave = chave
         self.host = host
@@ -230,6 +235,14 @@ def _construir(hud: ServidorHUD):
                 return self._json(200, hud.estado())
             if caminho == "/saude":
                 return self._json(200, hud.saude.medir())
+            if caminho == "/mapa":
+                if hud.mapa is None:
+                    return self._json(503, {"erro": "mapa desligado"})
+                return self._json(200, {"tipo": "mapa", **hud.mapa.inicio(),
+                                        "situacao": hud.mapa.diagnostico(),
+                                        "ativo": hud.mapa.disponivel()})
+            if caminho.startswith("/mapa/tela/"):
+                return self._tela(caminho[len("/mapa/tela/"):])
             if caminho == "/fluxo":
                 return self._fluxo()
             if caminho.startswith("/audio/"):
@@ -300,6 +313,25 @@ def _construir(hud: ServidorHUD):
                 pass
             finally:
                 hud._cancelar(fila)
+
+        def _tela(self, resto):
+            """/mapa/tela/z/x/y.png — do disco quando a tela já foi vista."""
+            if hud.mapa is None:
+                return self._json(503, {"erro": "mapa desligado"})
+            partes = resto.split("/")
+            if len(partes) != 3 or not partes[2].endswith(".png"):
+                return self._json(404, {"erro": "endereço de tela inválido"})
+            try:
+                dados = hud.mapa.tela(partes[0], partes[1], partes[2][:-4])
+            except MapaIndisponivel as erro:
+                return self._json(502, {"erro": str(erro)})
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(dados)))
+            # Uma tela nunca muda para o mesmo z/x/y: o navegador pode guardar.
+            self.send_header("Cache-Control", "public, max-age=604800")
+            self.end_headers()
+            self.wfile.write(dados)
 
         def _audio(self, nome):
             if hud.voz is None or not nome.endswith(".wav"):

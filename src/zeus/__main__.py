@@ -18,6 +18,10 @@ from pathlib import Path
 from threading import Event, Thread
 
 from . import __version__
+from .acoes import Acoes
+from .mapa import Mapa
+from .saudacao import compor as compor_saudacao
+from .saudacao import identificador_de_boot
 from .config import carregar as carregar_config
 from .ferramentas import Ferramentas
 from .execucao import (CaixaDeEntrada, FalaEmSegundoPlano, RecepcaoTelegram,
@@ -70,7 +74,9 @@ def montar(args):
     store = Store(args.state_dir.expanduser())
     persona = Persona.carregar(config.persona)
     pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
-    ferramentas = Ferramentas(store, pesquisa=pesquisa)
+    ferramentas = Ferramentas(store, pesquisa=pesquisa,
+                              acoes=montar_acoes(config, store),
+                              mapa=montar_mapa(config, args.state_dir.expanduser()))
     canal = None
     if config.canal_configurado:
         from .canais import CanalTelegram
@@ -88,6 +94,63 @@ def montar_pesquisa(config, estado):
                     maximo_de_bytes=config.pesquisa_max_bytes,
                     maximo_de_paginas=config.pesquisa_max_paginas,
                     destino=Path(estado) / "pesquisa")
+
+
+def montar_mapa(config, estado):
+    """As telas ficam no estado, não no repositório: são cache, não código."""
+    from .mapa import BUSCA_PADRAO, TELAS_PADRAO
+    return Mapa(ativo=bool(config.mapa_ativo),
+                telas_url=config.mapa_telas_url or TELAS_PADRAO,
+                busca_url=config.mapa_busca_url or BUSCA_PADRAO,
+                centro_lat=config.mapa_centro_lat,
+                centro_lon=config.mapa_centro_lon,
+                zoom=config.mapa_zoom,
+                cache_maximo_mb=config.mapa_cache_mb,
+                destino=Path(estado) / "mapa")
+
+
+def persona_de(config):
+    return Persona.carregar(config.persona)
+
+
+def diagnostico_do_contexto(config, persona):
+    """Compara o tamanho do prompt com a janela pedida ao modelo.
+
+    O Ollama corta pela frente, em silêncio, quando o prompt não cabe. O que
+    vive na frente é a persona. Foi assim que o Zeus respondeu sem identidade
+    sem nada no log dizer por quê, então o `check` passa a dizer antes."""
+    import json as _json
+    from .ferramentas import CATALOGO
+    from .contexto import estimar_tokens
+    partes = persona.instrucao()
+    partes += "".join(m["content"] for m in persona.exemplos())
+    partes += _json.dumps(CATALOGO, ensure_ascii=False)
+    estimado = estimar_tokens(partes) + 400      # folga para memória e turnos
+    janela = getattr(config, "contexto_tokens", 8192)
+    situacao = "cabe" if estimado < janela * 0.8 else "apertado"
+    if estimado >= janela:
+        situacao = ("NÃO CABE: o modelo vai descartar o começo do prompt, que é "
+                    "a persona. Aumente contexto_tokens.")
+    return f"{situacao} ({estimado} tokens estimados para janela de {janela})"
+
+
+def montar_acoes(config, store=None):
+    """As ações no computador existem só sobre as pastas que Nicolas apontou.
+
+    O registro vai para `eventos`: toda vez que o Zeus olhou alguma coisa fica
+    escrito, e `./zeus agenda` e a HUD mostram. Confiança que não deixa rastro
+    não é confiança, é esquecimento."""
+    def registrar(acao, alvo, resumo):
+        episodio = store.abrir_episodio("acao_no_computador", f"{acao}: {alvo}"[:300])
+        store.registrar_evento(episodio, "acoes", acao,
+                               {"alvo": alvo[:500], "resumo": resumo})
+        store.fechar_episodio(episodio, resumo[:200])
+
+    return Acoes(raizes=tuple(config.acoes_pastas or ()),
+                 maximo_de_bytes=config.acoes_max_bytes,
+                 maximo_de_itens=config.acoes_max_itens,
+                 permitir_abrir=bool(config.acoes_abrir),
+                 registrar=registrar if store is not None else None)
 
 
 def montar_voz(config):
@@ -203,6 +266,8 @@ def main():
     busca.add_argument("consulta")
     busca.add_argument("--cru", action="store_true",
                        help="Sem resultado, mostra o começo da página recebida")
+    busca.add_argument("--diagnostico", action="store_true",
+                       help="Testa cada endereço e método e diz onde a busca para")
 
     conversa = commands.add_parser("conversar", help="Uma troca pelo terminal")
     conversa.add_argument("texto")
@@ -236,6 +301,9 @@ def main():
                  modelo=modelo, canal=canal, voz=voz.diagnostico(),
                  ouvidos=ouvidos.diagnostico(),
                  pesquisa=montar_pesquisa(config, args.state_dir.expanduser()).diagnostico(),
+                 acoes=montar_acoes(config).diagnostico(),
+                 contexto=diagnostico_do_contexto(config, persona_de(config)),
+                 mapa=montar_mapa(config, args.state_dir.expanduser()).diagnostico(),
                  hud="configurada" if config.chave_hud else "sem chave definida",
                  config=config.sem_segredos())
             return 0 if integrity == "ok" and modelo_verificado else 1
@@ -306,6 +374,23 @@ def main():
             # ausência real ou leitor quebrado, e do lado de fora os dois se
             # parecem. Aqui dá para ver qual dos dois é.
             pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
+            if args.diagnostico:
+                relato = pesquisa.conferir(args.consulta)
+                emit("pesquisa_diagnostico", disponivel=relato.get("disponivel"),
+                     provedor=relato.get("provedor", ""),
+                     alguma_funcionou=relato.get("alguma_funcionou", False),
+                     motivo=relato.get("motivo", ""))
+                for linha in relato.get("tentativas", []):
+                    print(f"- {linha['tentativa']:<10} {linha.get('metodo','')}"
+                          f"  {linha.get('bytes', '—')} bytes"
+                          f"  {linha.get('fontes', 0)} fontes"
+                          f"  forma={linha.get('forma') or '—'}")
+                    detalhe = linha.get("erro") or linha.get("leitura", "")
+                    if detalhe and not linha.get("fontes"):
+                        print(f"  {detalhe}")
+                    if linha.get("primeira"):
+                        print(f"  {linha['primeira']}")
+                return 0 if relato.get("alguma_funcionou") else 3
             if not pesquisa.disponivel():
                 emit("pesquisa", situacao=pesquisa.diagnostico())
                 return 3
@@ -318,6 +403,8 @@ def main():
                  provedor=resultado.get("provedor"),
                  fontes=len(resultado.get("fontes", [])),
                  sem_resultado=bool(resultado.get("sem_resultado")),
+                 forma=resultado.get("forma", ""),
+                 motivo=resultado.get("motivo", ""),
                  aviso=resultado.get("aviso", ""))
             for fonte in resultado.get("fontes", []):
                 print(f"- {fonte.get('titulo', '')}\n  {fonte.get('url', '')}"
@@ -529,6 +616,7 @@ def _executar(zeus, store, config):
             host=config.hud_host, porta=config.hud_porta,
             estado=retrato(store, config, voz, servido if modelo_ok else "", ouvidos),
             pasta_de_escuta=ouvidos.destino,
+            mapa=montar_mapa(config, estado_local),
             certificado=certificado, chave_tls=chave_tls)
         porta = hud.iniciar()
         esquema = "https" if hud.seguro else "http"
@@ -548,13 +636,24 @@ def _executar(zeus, store, config):
                      hora=datetime.now().strftime("%H:%M"))
         hud.atualizar(retrato(store, config, voz, servido if modelo_ok else "", ouvidos))
 
+    def contar_lugares():
+        """Quando o Zeus localiza algo, o mapa da interface vai junto."""
+        achados = getattr(zeus.ferramentas, "ultimos_lugares", None)
+        if hud is not None and achados:
+            hud.publicar("lugares", lugares=achados[:5])
+        if achados is not None:
+            zeus.ferramentas.ultimos_lugares = []
+
     def responder(texto, canal, em_fluxo=False):
         """Uma pergunta, uma resposta, a mesma identidade em qualquer canal."""
         if not modelo_ok:
             store.registrar_turno(canal, "nicolas", texto)
             return SEM_MODELO
         if not (em_fluxo and hud is not None):
-            return zeus.conversar(texto, canal=canal)
+            try:
+                return zeus.conversar(texto, canal=canal)
+            finally:
+                contar_lugares()
 
         def empurrar(pedaco):
             if pedaco is None:
@@ -562,7 +661,10 @@ def _executar(zeus, store, config):
             else:
                 hud.publicar("fluxo", pedaco=pedaco)
 
-        return zeus.conversar(texto, canal=canal, ao_receber=empurrar)
+        try:
+            return zeus.conversar(texto, canal=canal, ao_receber=empurrar)
+        finally:
+            contar_lugares()
 
     fala = FalaEmSegundoPlano(voz, hud.publicar) if hud is not None else None
     supervisor = SupervisorPresenca(estado_local, config, stopped, hud, operacao)
@@ -583,6 +685,46 @@ def _executar(zeus, store, config):
                                  Store(estado_local), espera=config.espera_telegram)
         recepcao = RecepcaoTelegram(criar_receptor, recebidas_da_hud, stopped)
         recepcao.iniciar()
+    # A saudação vem depois de tudo estar de pé: canal, HUD e agenda. Falar
+    # antes disso seria prometer presença que ainda não existe.
+    boot = identificador_de_boot()
+    canal_da_saudacao = zeus.canal.nome if zeus.canal else "hud"
+    # Duas marcas, dois trabalhos. `marcar_envio` é o portão barato: ele decide
+    # antes de gastar uma geração do modelo, e só deixa passar uma vez por
+    # ligada da máquina. A fila de saída é a entrega, com reenvio e recibo.
+    def gerar_saudacao(pedido, canal):
+        """Fala uma vez, sem passar pelo ciclo de conversa.
+
+        `zeus.conversar` registraria o pedido como se Nicolas tivesse digitado
+        "a máquina acabou de ligar", e esse turno apareceria no histórico da
+        interface como fala dele. A saudação nasce do Zeus: só a resposta é
+        registrada, e nenhuma ferramenta entra na mesa."""
+        from .guarda import limpar_resposta
+        sistema = zeus.persona.sistema(
+            fatos=store.fatos("confirmado"), perguntas=store.perguntas_abertas(),
+            agenda=store.agenda_pendente(), agora=datetime.now(timezone.utc),
+            capacidades=zeus.capacidades)
+        mensagens = [{"role": "system", "content": sistema}]
+        mensagens += zeus.persona.exemplos()
+        mensagens.append({"role": "user", "content": pedido})
+        resposta = zeus.provedor.conversar(mensagens, None, config.temperatura_conversa)
+        texto = limpar_resposta(resposta.texto)
+        if texto:
+            store.registrar_turno(canal, "zeus", texto)
+        return texto
+
+    saudacao = compor_saudacao(store, store.marcar_envio, gerar_saudacao,
+                               datetime.now(), boot,
+                               ligada=bool(config.saudacao_ao_ligar),
+                               canal=canal_da_saudacao)
+    if saudacao:
+        fila_de_saida.preparar(f"saudacao-envio:{boot}", canal_da_saudacao,
+                               saudacao, tipo="saudacao")
+        emit("saudacao", boot=boot[:8], canal=canal_da_saudacao)
+        anunciar("zeus", saudacao)
+        if fala and voz.disponivel():
+            fala.falar(saudacao, 0)
+
     ultimo_batimento = 0.0
     while not stopped.is_set():
         try:

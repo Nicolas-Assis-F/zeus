@@ -27,13 +27,36 @@ class Config:
     modelo_conversa: str = ""
     keep_alive: str = "30m"
     limite_de_resposta: int = 320
-    pesquisa_provedor: str = "nenhum"
+    # Ligada por padrão. Desligada, o Zeus não sabe nada do mundo depois do
+    # treino e responde de memória com cara de certeza — foi assim que ele
+    # pareceu burro na primeira conversa de verdade. Quem quiser um Zeus sem
+    # rede escreve "nenhum" aqui: é uma linha. A barreira contra página que
+    # tenta mandar continua valendo de qualquer jeito.
+    pesquisa_provedor: str = "duckduckgo"
     pesquisa_url: str = ""
     pesquisa_timeout: int = 10
     pesquisa_cache_minutos: int = 30
     pesquisa_max_fontes: int = 4
     pesquisa_max_bytes: int = 1_000_000
     pesquisa_max_paginas: int = 3
+    # Pastas que o Zeus pode olhar. Vazio desliga as ações no computador.
+    # A lista é dele por escolha de Nicolas, não por descoberta: o Zeus nunca
+    # sai procurando o que mais existe na máquina.
+    # Mapa de localização. O centro padrão é Goiânia; troque para a sua casa e
+    # o mapa abre já olhando para o lugar certo.
+    # Uma saudação por ligada da máquina, não por subida do processo.
+    saudacao_ao_ligar: bool = True
+    mapa_ativo: bool = True
+    mapa_centro_lat: float = -16.6869
+    mapa_centro_lon: float = -49.2648
+    mapa_zoom: int = 13
+    mapa_telas_url: str = ""
+    mapa_busca_url: str = ""
+    mapa_cache_mb: int = 200
+    acoes_pastas: tuple = ()
+    acoes_abrir: bool = False
+    acoes_max_bytes: int = 200_000
+    acoes_max_itens: int = 200
     persona: str = "config/persona.md"
     hud_host: str = "0.0.0.0"
     hud_porta: int = 8770
@@ -48,6 +71,17 @@ class Config:
     escuta_beam: int = 1
     escuta_silencio_ms: int = 500
     escuta_vocabulario: str = ""
+    # O Ollama assume 2048 tokens de contexto quando ninguém diz o contrário, e
+    # corta o prompt pela frente sem avisar. A persona vive no começo, então o
+    # que ele descartava era justamente a identidade -- e sobrava um assistente
+    # genérico. Com 13 ferramentas no catálogo o prompt passa de 2900 tokens, o
+    # que fazia isso acontecer em toda conversa.
+    contexto_tokens: int = 8192
+    # Amostragem. Temperatura sozinha não tira a rigidez: sem penalidade de
+    # repetição o modelo pequeno cai nas mesmas construções toda resposta.
+    topo_p: float = 0.92
+    topo_k: int = 40
+    penalidade_de_repeticao: float = 1.15
     temperatura_conversa: float = 0.75
     temperatura_decisao: float = 0.0
     turnos_de_conversa: int = 12
