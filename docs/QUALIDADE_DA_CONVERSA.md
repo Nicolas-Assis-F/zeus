@@ -58,3 +58,54 @@ e para isso falta fonte de evento: presença, entrada, agenda, câmera. Sem uma
 delas, não há o que perceber, e qualquer "autonomia" seria só o modelo
 inventando assunto. O próximo degrau real é conectar a primeira fonte de evento,
 não aumentar a liberdade do modelo.
+
+## Agir, e depois contar
+
+Depois da primeira conversa longa pelo Telegram, Nicolas resumiu o problema em
+duas frases: "ainda muito robótico, sem persona" e "sempre fica falando pra eu
+confirmar". A segunda tinha causa concreta dentro do próprio arquivo de
+persona.
+
+Os exemplos de voz não são enfeite: eles entram na conversa como turnos reais,
+de usuário e de assistente. Um deles dizia, para um pedido de lembrete:
+
+> Vou conferir o horário e registrar esse lembrete. A confirmação vem assim que
+> estiver salvo.
+
+Isso ensina exatamente o hábito que incomodava — anunciar a intenção e devolver
+o turno. O exemplo virou:
+
+> Registrado para as 14h32. Falo com você lá.
+
+E a regra que faltava foi escrita: guardar um fato, consultar a memória,
+agendar, pesquisar, listar uma pasta permitida e ler um arquivo de texto são
+ações reversíveis e já autorizadas. O Zeus faz e relata no passado. "Procurei e
+achei", não "quer que eu procure".
+
+Perguntar antes ficou reservado a três casos: a ação sai do que Nicolas
+permitiu; ela é irreversível ou tem efeito fora da conversa, como abrir algo na
+tela dele; ou falta um dado que muda o resultado, e aí é uma pergunta só,
+adiantando o que já dá para adiantar.
+
+### Como saber se melhorou
+
+`tests/test_persona.py` guarda o arquivo contra a volta do hábito: nenhum
+exemplo de voz pode abrir com "posso", "devo", "quer que eu" ou "vou registrar".
+É um teste sobre o texto, não sobre o tom — ele impede a regressão óbvia e não
+prova nada sobre a conversa.
+
+A prova de tom é comparativa e cega. A persona anterior está guardada em
+`avaliacao/personas/anterior.md`, de propósito sem correção nenhuma:
+
+```
+./zeus persona-cega --real --variantes config/persona.md,avaliacao/personas/anterior.md
+```
+
+As respostas aparecem sob rótulos opacos, embaralhados por jornada. Nicolas dá
+nota nos seis critérios e só depois vem a revelação.
+
+A jornada `sem-pedir-licenca`, em `avaliacao/jornadas.json`, cobre o lado
+automático: ela roda só com `--real`, porque com dublê o texto é fixo e não diz
+nada sobre tom. Os passos verificam que guardar um fato e pesquisar acontecem
+sem pedir licença, e que abrir algo na tela — a única ação com efeito fora da
+conversa — continua sendo confirmada antes.
