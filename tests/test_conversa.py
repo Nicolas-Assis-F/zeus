@@ -44,6 +44,27 @@ class ChamadaVazada(unittest.TestCase):
         self.assertIn('"temperatura"', limpar_resposta('Olha: {"temperatura": 21}'))
 
 
+class PapelVazado(unittest.TestCase):
+    """Nicolas recebeu mensagens começando com a palavra "assistant".
+
+    Uma delas era só isso, sem resposta nenhuma. É o gabarito do formato de
+    chat escapando para dentro do conteúdo, não algo que ele escreveu."""
+
+    def test_palavra_do_papel_sai_do_inicio(self):
+        self.assertEqual(limpar_resposta("assistant\n\nOpa, senhor."), "Opa, senhor.")
+        self.assertEqual(limpar_resposta("Assistant: tudo certo"), "tudo certo")
+        self.assertEqual(limpar_resposta("<|im_start|>assistant\nOi"), "Oi")
+
+    def test_resposta_que_era_so_o_papel_vira_frase_honesta(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store, _, zeus = montar(temp, [Resposta("assistant", [], "m")])
+            self.assertEqual(zeus.conversar("e aí?"), SEM_RESPOSTA)
+            store.close()
+
+    def test_a_palavra_no_meio_do_texto_nao_e_tocada(self):
+        self.assertIn("assistant", limpar_resposta("o papel assistant do modelo"))
+
+
 class TomDaConversa(unittest.TestCase):
     def test_exemplos_de_voz_entram_como_turnos_reais(self):
         with tempfile.TemporaryDirectory() as temp:

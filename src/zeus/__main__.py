@@ -198,6 +198,12 @@ def main():
     forget = commands.add_parser("forget", help="Remover um fato da memória ativa")
     forget.add_argument("key")
 
+    busca = commands.add_parser(
+        "pesquisar", help="Rodar uma busca e ver as fontes, sem passar pelo modelo")
+    busca.add_argument("consulta")
+    busca.add_argument("--cru", action="store_true",
+                       help="Sem resultado, mostra o começo da página recebida")
+
     conversa = commands.add_parser("conversar", help="Uma troca pelo terminal")
     conversa.add_argument("texto")
 
@@ -295,6 +301,30 @@ def main():
             return avaliar_persona(config, args)
         elif args.command == "medir":
             return medir(config, zeus, args)
+        elif args.command == "pesquisar":
+            # Diagnóstico direto: "não encontrei fonte confiável" pode ser
+            # ausência real ou leitor quebrado, e do lado de fora os dois se
+            # parecem. Aqui dá para ver qual dos dois é.
+            pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
+            if not pesquisa.disponivel():
+                emit("pesquisa", situacao=pesquisa.diagnostico())
+                return 3
+            try:
+                resultado = pesquisa.buscar(args.consulta)
+            except Exception as erro:
+                emit("pesquisa", consulta=args.consulta, erro=str(erro)[:300])
+                return 3
+            emit("pesquisa", consulta=resultado.get("consulta"),
+                 provedor=resultado.get("provedor"),
+                 fontes=len(resultado.get("fontes", [])),
+                 sem_resultado=bool(resultado.get("sem_resultado")),
+                 aviso=resultado.get("aviso", ""))
+            for fonte in resultado.get("fontes", []):
+                print(f"- {fonte.get('titulo', '')}\n  {fonte.get('url', '')}"
+                      f"\n  {fonte.get('trecho', '')[:200]}")
+            if args.cru and not resultado.get("fontes"):
+                print("\n--- começo do que o buscador devolveu ---")
+                print(getattr(pesquisa, "ultima_pagina", "")[:1200] or "(nada)")
         elif args.command == "conversar":
             ligar_modelo(zeus, config)
             print(zeus.conversar(args.texto, canal="cli"))
