@@ -172,7 +172,8 @@ class PaginaNaoManda(unittest.TestCase):
             nomes_rodada1 = {f["function"]["name"] for f in provedor.catalogos[0]}
             self.assertIn("esquecer_fato", nomes_rodada1)
             nomes_rodada2 = {f["function"]["name"] for f in provedor.catalogos[1]}
-            self.assertEqual(nomes_rodada2, {"pesquisar", "ler_pagina"})
+            # Nem uma busca nova: a consulta também seria canal de saída.
+            self.assertEqual(nomes_rodada2, {"ler_pagina"})
             self.assertNotIn("esquecer_fato", nomes_rodada2)
             store.close()
 
