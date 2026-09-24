@@ -85,7 +85,8 @@ forense e não remove cópias de segurança anteriores.
 | `guarda.py` | Barreiras que não dependem do modelo se comportar |
 | `tempo.py` | Interpretação de momentos declarados em português |
 | `canais/` | Telegram e canal em memória para teste |
-| `hud/` | Interface no navegador, servida pelo próprio processo |
+| `hud/` | Interface no navegador, servida pelo próprio processo; estilos e scripts em `hud/estatico/`, sem build |
+| `telemetria.py` | Medida de cada turno, sem conteúdo; `./zeus medidas` e `./zeus bancada` |
 | `voz.py` | Síntese local com Piper, opcional |
 | `pesquisa.py` | Busca com fontes, procedência e cache, opcional |
 | `ouvidos.py` | Escuta local com faster-whisper, opcional |

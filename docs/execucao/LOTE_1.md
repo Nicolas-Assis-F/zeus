@@ -41,6 +41,8 @@ localmente, pendente no X99, validado, integrado. “Passou com dublê”,
 | Z01 | verificado localmente; linha de base pendente no X99 | `tests/test_telemetria.py`, `tests/test_bancada.py`, `docs/MEDIDAS.md` |
 | Z02 | verificado localmente com dublês; comportamento do modelo real pendente no X99 | `tests/test_estados.py`, `tests/test_entregas.py`, `tests/test_hud.py` |
 | Z03 | verificado localmente com dublês e loopback; TLS real da HUD e DNS real pendentes no X99 | `tests/test_fronteiras.py`, `tests/test_hud.py` (classe `Sessao`) |
+| Z04 | verificado em navegador (Chrome headless) com backend e estado isolados; uso real no X99 e em celular físico pendentes | `tests/test_hud.py`, `tests/test_hud_integrada.py`, roteiro abaixo |
+| Z05 (mínimo) | sequência SSE, reenvio por `Last-Event-ID`, ressincronização e id de mensagem com deduplicação; paginação e cadências por tipo ficam para a Z05 | `tests/test_hud.py` |
 
 ### Z02 — defeitos reproduzidos na base
 
@@ -66,6 +68,60 @@ da correção:
 
 Rotação de credenciais: descrita por nome no relatório ao usuário, nunca por
 valor. Esta execução não revogou nem trocou credencial nenhuma.
+
+### Z04 — validação da HUD v1 em navegador
+
+Ambiente: Chrome 151 headless dirigido pelo DevTools Protocol, Zeus em
+loopback com estado e configuração próprios, Ollama falso (fluxo lento e uma
+ferramenta), Piper falso (WAV de 2 s), Telegram, pesquisa e mapa desligados,
+dados fictícios semeados (fatos, perguntas, lembretes, entrega incerta,
+entrada interrompida com efeito iniciado). Nenhum serviço real foi acionado.
+
+| Fluxo | Resultado |
+| --- | --- |
+| Entrada | chave errada → "Chave ou código inválido"; endereço antigo com `?chave=` vira sessão e a barra fica sem chave; cookie não legível por script |
+| Mensagem | enviando → na fila → processando → concluída; faixa Agora com etapa e tempo; "Como chegou a isso?" com ferramentas, etapas e tempo medidos |
+| Ferramenta | lembrete agendado aparece na lista de lembretes; faixa mostra a etapa real |
+| Pergunta | "Responder" liga a resposta ao número; a pergunta sai de "aguardando" |
+| Pendência | entrega incerta: dois toques, backend aplica, lista atualiza |
+| Áudio | toca sozinho só no turno atual; "Parar áudio" para e some |
+| Queda de rede | faixa de aviso; envio falha com "Tentar de novo"; rascunho novo preservado; reenvio com o mesmo id entra **uma** vez no banco |
+| Queda do servidor no meio da resposta | a mensagem vira "interrompida: o Zeus reiniciou", o trecho recebido fica marcado como incompleto; a sessão sobrevive ao reinício |
+| Modelo indisponível | sinal "modelo indisponível" na hora da falha, nota no campo, resposta honesta; sinal volta a "pronto" quando o modelo retorna |
+| Estados vazios | conversa, pendências e Hoje dizem que não há nada; modelo fora desde o início aparece como tal |
+| Microfone | sem dispositivo/permissão → "microfone negado" e aviso na faixa (caminho forçado no headless, que não tem microfone) |
+| Carregamento parcial | servidor fora → "Sem dados de saúde agora (sem conexão). Os últimos valores continuam na tela." |
+| Tamanhos | 1440×900, 1024×768 (painel vira gaveta), 390×844 (navegação embaixo), zoom 200%: sem rolagem lateral; menor alvo de toque 44 px |
+| Teclado | Tab segue pular → navegação → sair → histórico → campo → microfone → enviar → painel; `/` volta ao campo; Esc fecha a gaveta e devolve o foco |
+| Rolagem | lendo o topo durante uma resposta, a tela não é puxada e aparece "Novas mensagens" |
+| Contraste | menor par de texto 5,6:1 (cinza apagado sobre superfície) |
+| Console | nenhum erro além dos provocados de propósito (rede desligada, chave errada) |
+
+Defeitos achados e corrigidos durante a validação: estado final sobrescrito
+pelo 202 quando o fluxo chegava antes da resposta do POST; faixa Agora presa
+num turno da subida anterior; reconstrução do histórico apagando bolhas
+interrompidas; faixa de aviso quebrando o layout; texto da mensagem que
+falhou duplicado no campo; sinal do modelo sem atualizar na falha e na volta.
+
+### Limites que continuam
+
+- Mensagem da HUD não é durável no servidor: se o Zeus cair com ela na fila,
+  a página marca "interrompida", mas o texto não é reprocessado sozinho.
+- Deduplicação por id vale dentro de uma subida do servidor.
+- Não há cancelamento da geração; só "Parar áudio".
+- O histórico curto de eventos para reenvio é de 1500 eventos em memória.
+- Gestos continuam segmentação de pele e movimento, sem dedos; o arrasto do
+  mapa saiu.
+- Mapa de localização e escuta local não foram exercitados (desligados ou
+  ausentes nesta máquina).
+
+### Roteiro seguro para o X99
+
+1. Numa worktree do X99, sem tocar o serviço: `./zeus bancada --state-dir /tmp/bancada-$(git log -1 --format=%h) --repeticoes 3`
+   e `./zeus medidas --pasta /tmp/bancada-*/medidas` (ver `docs/MEDIDAS.md`).
+2. Para a HUD real: ligar `telemetria_arquivo`, abrir a interface no aparelho
+   de uso, conversar, e conferir Diagnóstico → "Últimos turnos medidos".
+3. Colar na issue o JSON de `./zeus medidas` e a linha `sessao`, sem o estado.
 
 ## Anúncio sugerido para as issues
 

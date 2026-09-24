@@ -35,15 +35,93 @@ A chave não é decoração. Sem ela, qualquer aparelho na mesma rede conversari
 com a memória do Zeus. A página em si é pública; nenhuma rota de dado responde
 sem sessão válida, e a comparação é de tempo constante.
 
-## O que a interface mostra
+## O que a interface mostra (HUD v1)
 
-O orbe reage ao estado: ocioso, ouvindo, pensando, falando, offline. Não é
-enfeite — é a diferença entre "está gerando" e "travou", que a 9,8 tokens por
-segundo importa mais do que parece.
+A conversa fica no centro; o resto vem quando é preciso. Quatro áreas, com
+navegação no topo (e embaixo, no celular):
 
-Ao lado ficam as perguntas em aberto, a agenda e a memória confirmada. É a
-mesma memória do Telegram: o que você conta por um canal aparece no outro,
-porque a identidade e o episódio são do Zeus, não do canal.
+- **Hoje** — o orbe, o que vem na agenda, o que precisa de você, a conversa
+  recente e o estado verificado de cada capacidade. Nada de "próximo passo"
+  inventado: só o que está no banco.
+- **Conversa** — histórico, resposta em fluxo e um painel recolhível com
+  pendências, memória confirmada (só leitura) e mapa.
+- **Pendências** — no desktop abre o painel; no celular é uma vista própria.
+- **Diagnóstico** — saúde da máquina (CPU, GPU, memória, disco, rede), mapa de
+  capacidades, operação do supervisor e os últimos turnos medidos.
+
+Embaixo do topo fica a faixa **Agora**: a etapa real que o núcleo publicou
+(reunindo contexto, consultando o modelo, pesquisando, agendando lembrete,
+escrevendo, transcrevendo), o tempo que o servidor mediu e o resultado
+("Concluída em 3,2 s", "Falhou: modelo indisponível"). Um "pensando" genérico
+não conta como resposta.
+
+Três sinais separados no topo: **modelo** (respondeu à verificação ou não),
+**microfone** (pronto, gravando, negado, sem dispositivo, exige https) e
+**conexão** com o Zeus. O orbe representa só a interação — pronto, capturando,
+transcrevendo, preparando, executando, escrevendo, falando, erro ou sem
+conexão. Carga da CPU não muda o orbe; ela mora no Diagnóstico.
+
+### Mensagens com identidade e estado
+
+Cada mensagem ganha um id no aparelho. Os estados vêm do servidor: *enviando*
+→ *na fila* (é só isso que o HTTP 202 quer dizer) → *processando* → *concluída*,
+*falhou* ou *interrompida*. Reenviar usa o mesmo id e o servidor não duplica.
+Se o envio não chega (rede caída), a bolha fica com "Tentar de novo", a
+mensagem é guardada neste aparelho e sai do campo, para que um segundo Enter
+não crie outra. O rascunho que está sendo digitado fica guardado e volta
+depois de recarregar a página.
+
+Cada resposta tem "Como chegou a isso?": ferramentas usadas, fontes
+encontradas e lidas (com link), etapas do modelo e tempo medido. Nenhuma
+explicação inventada do raciocínio.
+
+Perguntas do Zeus têm "Responder": a resposta vai com o número da pergunta.
+Mensagem solta não encerra pergunta nenhuma.
+
+A tela não é puxada para baixo enquanto você lê o histórico; aparece "Novas
+mensagens" para voltar ao fim. O leitor de tela recebe a resposta por frases,
+não por fragmento.
+
+### Pendências e o que dá para fazer com elas
+
+Só as ações que o backend suporta, e em dois toques quando não têm volta:
+
+| Pendência | O que diz | Ações |
+| --- | --- | --- |
+| Entrega incerta | sem confirmação de que chegou | Chegou · Não chegou — reenviar · Descartar |
+| Entrega que falhou ou expirou | motivo | Reenviar · Descartar |
+| Mensagem do Telegram interrompida | efeitos que já começaram, ou nenhum | Reprocessar (avisa se pode repetir) · Descartar |
+| Pergunta aguardando | o texto | Responder · Cancelar |
+| Lembrete | quando | Cancelar |
+
+Resultado incerto pede verificação de quem sabe se chegou; nunca um reenvio
+automático às cegas.
+
+### Reconexão
+
+O fluxo SSE leva `id` em cada evento. Na reconexão o navegador manda o último
+visto e recebe o que faltou; se o buraco já saiu do histórico curto do
+servidor, ou se o Zeus reiniciou, chega "ressincronizar" e a página recarrega o
+estado. Mensagens que estavam em andamento num reinício aparecem como
+*interrompidas*, com o trecho que chegou marcado como incompleto.
+
+### Controles de áudio
+
+"Parar áudio" para a reprodução e só isso. Não existe ainda botão de
+interromper a resposta: o backend não cancela a geração, e um botão que
+fingisse cancelar seria pior que nenhum.
+
+### Arquivos
+
+Sem build e sem framework. `index.html` é só marcação; estilos e scripts vivem
+em `src/zeus/hud/estatico/` e são servidos por `/estatico/NOME` — só nomes
+simples, só `.js` e `.css`, só dessa pasta. Nenhum texto que veio de fora
+vira marcação: a página monta elementos com `textContent`.
+
+Validação desta versão: Chrome headless com backend e estado isolados, Ollama
+e Piper falsos, dados fictícios, em 1440×900, 1024×768, 390×844 e zoom de
+200%, teclado (Tab, `/`, Esc) e contraste mínimo de 5,6:1 no texto. O
+roteiro está descrito em `docs/execucao/LOTE_1.md`.
 
 ## Voz que sai: Piper, local
 
@@ -238,25 +316,9 @@ O navegador pede `/saude` a cada dois segundos e para quando a aba sai de foco.
 `nvidia-smi` custa uns 40 ms e é consultado no máximo a cada três segundos; se
 não existe placa, a busca acontece uma vez e nunca mais.
 
-### O que a página mostra
+### Onde a saúde aparece
 
-A coluna da esquerda é o plasma: o orbe, o estado (ocioso, ouvindo, pensando,
-falando, offline) e os chips de capacidade. O anel externo do orbe é a
-ocupação da CPU, e o ritmo da respiração acompanha a carga — dá para sentir a
-máquina sob pressão sem ler número nenhum.
-
-Abaixo vem o mapa do Zeus: cada nó é uma capacidade, e a aresta acende quando
-ela está verificada. É o mapa honesto que dá para desenhar hoje. Um mapa
-geográfico exige sensor com posição, e ainda não existe nenhum; desenhar um
-agora seria enfeite.
-
-A coluna da direita são os sinais vitais: CPU (total, por núcleo, frequência,
-temperatura, carga), GPU (uso, VRAM, temperatura, potência, ventoinha),
-memória e swap, disco do estado do Zeus, rede e o próprio processo. A faixa
-embaixo guarda os últimos três minutos de CPU, memória e GPU — o suficiente
-para ver se o pico foi a resposta que acabou de sair ou algo que já estava lá.
-
-As pendências (perguntas, agenda, entregas, memória, operação) ficam em abas,
-com contador, em vez de empilhadas numa lista só.
-
-Abaixo de 980 px a página vira três vistas — Conversa, Saúde e Mapa — no celular.
+Na vista Diagnóstico: medidores de CPU e GPU, núcleos, os últimos minutos de
+CPU, memória e GPU, memória, swap, VRAM, disco do estado, rede e o processo
+do Zeus. O navegador só pede `/saude` com essa vista aberta e a aba visível —
+a cada dois segundos, ou a cada dez no modo Economia.
