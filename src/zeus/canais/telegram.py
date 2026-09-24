@@ -105,7 +105,9 @@ class CanalTelegram:
             chat = str((mensagem.get("chat") or {}).get("id", ""))
             texto = mensagem.get("text", "")
             if chat == self.chat_id and isinstance(texto, str) and texto.strip():
-                mensagens.append({"id": identificador, "texto": texto})
+                citada = (mensagem.get("reply_to_message") or {}).get("message_id")
+                mensagens.append({"id": identificador, "texto": texto,
+                                  "responde_a_mensagem": citada})
         if self.store is None:
             return mensagens
         db = self.store.connection
@@ -113,6 +115,11 @@ class CanalTelegram:
             for m in mensagens:
                 db.execute("INSERT OR IGNORE INTO entradas (id,texto,recebida_em) VALUES (?,?,?)",
                            (m['id'], m['texto'], texto_de(agora_utc())))
+                # "Responder" no Telegram é o vínculo explícito com uma
+                # pergunta: guardado junto da entrada, na mesma transação.
+                if isinstance(m.get("responde_a_mensagem"), int):
+                    db.execute("INSERT OR IGNORE INTO kv (chave,valor) VALUES (?,?)",
+                               (f"telegram_responde_a:{m['id']}", str(m["responde_a_mensagem"])))
             # Só avançar depois que todas as mensagens válidas estão no disco.
             if maior:
                 db.execute("INSERT INTO kv (chave,valor) VALUES (?,?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor",

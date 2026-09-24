@@ -52,6 +52,13 @@
      "nicolas": "pode lembrar sim",
      "modelo": [
       {
+       "ferramenta": "responder_pergunta",
+       "argumentos": {
+        "pergunta": 1,
+        "resposta": "pode lembrar sim"
+       }
+      },
+      {
        "ferramenta": "agendar_lembrete",
        "argumentos": {
         "texto": "creatina antes do treino",
@@ -64,6 +71,7 @@
      ],
      "espera": {
       "usou": [
+       "responder_pergunta",
        "agendar_lembrete"
       ],
       "pergunta_respondida": true

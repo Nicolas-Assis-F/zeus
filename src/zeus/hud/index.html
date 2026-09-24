@@ -714,10 +714,10 @@ function aplicarGesto(visto){
 
   if (visto.acenando && agora - ULTIMO_GESTO > 1500){
     ULTIMO_GESTO = agora;
+    /* Aceno pede atenção, não liga microfone: "ouvindo" aqui seria mentira,
+       porque nenhuma captura de áudio começou. */
     $("texto").focus();
-    mudarEstado("ouvindo", "aceno reconhecido");
-    dizerGesto("Aceno: atenção no campo de conversa.");
-    setTimeout(() => { if (ESTADO === "ouvindo") mudarEstado("ocioso", NADA); }, 2500);
+    dizerGesto("Aceno: campo de conversa em foco. O microfone continua desligado.");
     return;
   }
   if (primeiro){ dizerGesto("Mão à vista. Acene para chamar; mova para arrastar o mapa."); return; }
@@ -1277,7 +1277,10 @@ function pintarChips(estado, capacidades){
   /* Um chip por capacidade, nunca dois: o diagnóstico do supervisor vale
      mais que o palpite do retrato, então ele sobrescreve pelo mesmo id. */
   const marcas = new Map([
-    ["modelo",  [!!estado.modelo, "modelo", estado.modelo || "sem modelo"]],
+    /* O modelo só acende quando respondeu à verificação: o nome configurado
+       não é prova de que ele está de pé. */
+    ["modelo",  [estado.modelo_estado ? estado.modelo_estado === "pronta" : !!estado.modelo,
+                 "modelo", estado.modelo || ((estado.modelo_configurado || "modelo") + " indisponível")]],
     ["voz",     [!!estado.voz, estado.voz ? "voz local" : "sem voz", ""]],
     ["ouvidos", [!!estado.ouvidos, estado.ouvidos ? "ouvidos locais" : "sem ouvidos",
                  estado.motivo_ouvidos || ""]],
@@ -1311,7 +1314,7 @@ function pintarEstado(estado){
   $("modeloTopo").textContent = estado.modelo
     ? estado.modelo + (estado.voz ? " · voz local" : " · sem voz")
                     + (estado.ouvidos ? " · ouvidos locais" : "")
-    : "presença local";
+    : (estado.modelo_configurado ? estado.modelo_configurado + " · indisponível" : "presença local");
   pintarChips(estado, capacidades);
   ajustarMicrofone(estado);
 }

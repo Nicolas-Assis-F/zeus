@@ -28,9 +28,21 @@ tentativas, com pausas de 30 e 60 segundos. Timeout é ambíguo.
 
 Entradas válidas do Telegram são gravadas junto do offset, antes da geração.
 Uma atualização ignorada posterior não perde a mensagem válida anterior.
-Entrada interrompida durante a geração fica incerta: ferramentas podem já ter
-agido, portanto reprocessar exige decisão explícita. Respostas prontas ficam na
-fila e não precisam ser geradas novamente após falha de envio.
+Entrada interrompida durante a geração só volta sozinha para a fila quando dá
+para provar que nada com efeito começou. Antes de rodar uma ferramenta que muda
+memória, agenda ou algo fora do Zeus, o núcleo grava a intenção num episódio
+`efeitos_do_turno` ligado ao turno; depois grava o resultado. Na recuperação, e
+também numa falha do modelo no meio da resposta:
+
+- sem intenção de efeito registrada, a entrada volta para `pendente` e é
+  respondida de novo (no máximo duas vezes; depois fica incerta);
+- com intenção registrada, ou vinda de versão anterior que não deixava esse
+  rastro, fica `incerta` e pede revisão — repetir poderia duplicar a ação.
+
+Respostas prontas ficam na fila e não precisam ser geradas novamente após
+falha de envio. O texto da resposta pode falhar; o registro do que foi feito,
+não: se a redação sair vazia, a resposta descreve o efeito real em vez de dizer
+que não soube responder.
 
 ## Inspeção e resolução
 
