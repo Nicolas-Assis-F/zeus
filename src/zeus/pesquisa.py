@@ -17,8 +17,12 @@ Duas regras de segurança moram aqui, e nenhuma depende do modelo se comportar:
    e diz como habilitar, em vez de sair pela rede por conta própria.
 """
 
+import http.client
+import ipaddress
 import json
 import re
+import socket
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -189,41 +193,122 @@ def _endereco_seguro(url: str) -> bool:
     return not HOSPEDE_INTERNO.match(partes.hostname or "")
 
 
-class _SemRedirecionar(urllib.request.HTTPRedirectHandler):
-    """Não segue redirecionamento sozinho: cada salto é conferido antes."""
+# Endereços que não são internet pública mesmo quando o módulo ipaddress não
+# os marca como privados: a faixa compartilhada 100.64.0.0/10 é a do Tailscale,
+# que o próprio projeto prevê para acesso remoto.
+REDE_COMPARTILHADA = ipaddress.ip_network("100.64.0.0/10")
+REDIRECIONAMENTOS = (301, 302, 303, 307, 308)
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+
+def ip_publico(endereco: str) -> bool:
+    """Só internet pública: nada de loopback, rede de casa, link-local, VPN."""
+    try:
+        ip = ipaddress.ip_address(str(endereco).split("%")[0])
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return bool(ip.is_global and not ip.is_multicast
+                and not (ip.version == 4 and ip in REDE_COMPARTILHADA))
+
+
+def resolver_publico(host: str, porta: int, resolver=None, permitido=None) -> str:
+    """Resolve o nome e só devolve endereço se todos forem públicos.
+
+    O nome do link não prova nada: `algo.exemplo` pode resolver para
+    127.0.0.1. Por isso a decisão é tomada sobre o que o DNS respondeu, e a
+    conexão é aberta nesse mesmo endereço — um segundo DNS no meio do caminho
+    não tem como trocar o destino."""
+    resolver = resolver or socket.getaddrinfo
+    permitido = permitido or ip_publico
+    try:
+        respostas = resolver(host, porta, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        raise PesquisaIndisponivel("não consegui resolver o endereço da página")
+    enderecos = [r[4][0] for r in respostas or []]
+    if not enderecos:
+        raise PesquisaIndisponivel("não consegui resolver o endereço da página")
+    if not all(permitido(e) for e in enderecos):
+        raise PesquisaIndisponivel(
+            "endereço recusado por segurança: o nome aponta para rede interna")
+    return enderecos[0]
+
+
+class _HTTPFixo(http.client.HTTPConnection):
+    """HTTP no IP já conferido, com o nome original no cabeçalho Host."""
+
+    def __init__(self, host, ip, porta, timeout):
+        super().__init__(host, porta, timeout=timeout)
+        self._ip = ip
+
+    def connect(self):
+        self.sock = socket.create_connection((self._ip, self.port), self.timeout)
+
+
+class _HTTPSFixo(http.client.HTTPSConnection):
+    """HTTPS no IP conferido; o certificado é validado contra o nome original."""
+
+    def __init__(self, host, ip, porta, timeout):
+        super().__init__(host, porta, timeout=timeout, context=ssl.create_default_context())
+        self._ip = ip
+
+    def connect(self):
+        bruto = socket.create_connection((self._ip, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(bruto, server_hostname=self.host)
+
+
+def _abrir_fixo(esquema, host, ip, porta, caminho, timeout, maximo_bytes):
+    classe = _HTTPSFixo if esquema == "https" else _HTTPFixo
+    conexao = classe(host, ip, porta, timeout)
+    try:
+        conexao.request("GET", caminho, headers={
+            "User-Agent": AGENTE, "Accept-Language": IDIOMA, "Accept-Encoding": "identity"})
+        resposta = conexao.getresponse()
+        cabecalhos = {k.lower(): v for k, v in resposta.getheaders()}
+        corpo = resposta.read(maximo_bytes + 1) if resposta.status < 300 else b""
+        return resposta.status, cabecalhos, corpo
+    except ssl.SSLError:
+        raise PesquisaIndisponivel("o certificado da página não confere")
+    except (socket.timeout, TimeoutError):
+        raise PesquisaIndisponivel("a página demorou demais e foi interrompida")
+    except (OSError, http.client.HTTPException) as erro:
+        raise PesquisaIndisponivel(f"não consegui abrir a página: {type(erro).__name__}")
+    finally:
+        conexao.close()
 
 
 def transporte_pagina(url: str, timeout: int = 10, maximo_bytes: int = MAXIMO_DE_BYTES,
-                      saltos: int = 3):
-    """Abre a página conferindo cada endereço, sem seguir redirecionamento cego,
-    limitando o tamanho lido. Devolve tipo, corpo, endereço final e se truncou."""
-    opener = urllib.request.build_opener(_SemRedirecionar)
+                      saltos: int = 3, resolver=None, abrir=None, permitido=None):
+    """Abre a página conferindo cada destino, sem seguir redirecionamento cego,
+    limitando o tamanho lido. Devolve tipo, corpo, endereço final e se truncou.
+
+    Cada salto passa pelas mesmas três portas: esquema e nome plausíveis,
+    DNS que só responde endereço público, e conexão presa a esse endereço."""
+    abrir = abrir or _abrir_fixo
     atual = url
     for _ in range(saltos + 1):
         if not _endereco_seguro(atual):
             raise PesquisaIndisponivel("endereço recusado por segurança (interno ou não-web)")
-        pedido = urllib.request.Request(
-            atual, headers={"User-Agent": AGENTE, "Accept-Language": IDIOMA})
+        partes = urllib.parse.urlsplit(atual)
         try:
-            resposta = opener.open(pedido, timeout=timeout)
-        except urllib.error.HTTPError as erro:
-            destino = erro.headers.get("Location") if erro.code in (301, 302, 303, 307, 308) else None
-            if destino:
-                atual = urllib.parse.urljoin(atual, destino)
-                continue
-            raise PesquisaIndisponivel(f"a página respondeu {erro.code}")
-        except urllib.error.URLError as erro:
-            raise PesquisaIndisponivel(f"não consegui abrir a página: {erro.reason}")
-        except TimeoutError:
-            raise PesquisaIndisponivel("a página demorou demais e foi interrompida")
-        with resposta:
-            tipo = resposta.headers.get("Content-Type", "")
-            bruto = resposta.read(maximo_bytes + 1)
-            final = resposta.geturl()
-        return tipo, bruto[:maximo_bytes].decode("utf-8", "replace"), final, len(bruto) > maximo_bytes
+            porta = partes.port or (443 if partes.scheme == "https" else 80)
+        except ValueError:
+            raise PesquisaIndisponivel("endereço com porta inválida")
+        ip = resolver_publico(partes.hostname, porta, resolver, permitido)
+        caminho = (partes.path or "/") + (f"?{partes.query}" if partes.query else "")
+        status, cabecalhos, corpo = abrir(partes.scheme, partes.hostname, ip, porta,
+                                          caminho, timeout, maximo_bytes)
+        if status in REDIRECIONAMENTOS:
+            destino = cabecalhos.get("location")
+            if not destino:
+                raise PesquisaIndisponivel(f"a página respondeu {status} sem destino")
+            atual = urllib.parse.urljoin(atual, destino)
+            continue
+        if status >= 400:
+            raise PesquisaIndisponivel(f"a página respondeu {status}")
+        tipo = cabecalhos.get("content-type", "")
+        return (tipo, corpo[:maximo_bytes].decode("utf-8", "replace"), atual,
+                len(corpo) > maximo_bytes)
     raise PesquisaIndisponivel("página com redirecionamentos demais")
 
 

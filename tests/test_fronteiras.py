@@ -12,7 +12,8 @@ from zeus.ferramentas import Ferramentas
 from zeus.llm import Resposta
 from zeus.nucleo import Zeus
 from zeus.persona import Persona
-from zeus.pesquisa import Pesquisa
+from zeus.pesquisa import (Pesquisa, PesquisaIndisponivel, ip_publico, resolver_publico,
+                           transporte_pagina)
 from zeus.store import Store
 
 BUSCA_COM_INJECAO = (
@@ -99,6 +100,94 @@ class LeitorSoAbreFonteDoTurno(unittest.TestCase):
         self.conversar([Resposta("", [chamada("ler_pagina", fonte="F1")], "m"),
                         Resposta("ok", [], "m")], texto="abre aquela")
         self.assertEqual(self.abertas, [])
+
+
+
+def dns(tabela):
+    """Resolver falso: nome -> lista de IPs, no formato do getaddrinfo."""
+    import socket as _socket
+
+    def resolver(host, porta, type=None):
+        if host not in tabela:
+            raise _socket.gaierror("sem nome")
+        return [(_socket.AF_INET6 if ":" in ip else _socket.AF_INET, _socket.SOCK_STREAM,
+                 6, "", (ip, porta)) for ip in tabela[host]]
+    return resolver
+
+
+class TransporteConfereDestino(unittest.TestCase):
+    """Achado S3: o filtro olhava só o texto do nome. `[::1]`, a faixa do
+    Tailscale, IP decimal, `.local` e nomes públicos que apontam para
+    127.0.0.1 passavam."""
+
+    def test_so_internet_publica_conta_como_destino(self):
+        for recusado in ("127.0.0.1", "::1", "10.0.0.5", "192.168.100.221", "172.16.0.1",
+                         "100.100.1.1", "169.254.169.254", "fd00::1", "fe80::1",
+                         "::ffff:127.0.0.1", "0.0.0.0", "224.0.0.1", "nao-e-ip"):
+            self.assertFalse(ip_publico(recusado), recusado)
+        for aceito in ("93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"):
+            self.assertTrue(ip_publico(aceito), aceito)
+
+    def test_nome_que_resolve_para_rede_interna_e_recusado_antes_de_conectar(self):
+        abertos = []
+        for tabela in ({"localtest.me": ["127.0.0.1"]},
+                       {"misto.exemplo": ["93.184.216.34", "10.0.0.1"]},
+                       {"zeus.local": ["192.168.100.221"]}):
+            host = next(iter(tabela))
+            with self.assertRaises(PesquisaIndisponivel):
+                transporte_pagina(f"http://{host}/", resolver=dns(tabela),
+                                  abrir=lambda *a: abertos.append(a))
+        self.assertEqual(abertos, [])
+
+    def test_redirecionamento_para_rede_interna_para_no_salto(self):
+        abertos = []
+
+        def abrir(esquema, host, ip, porta, caminho, timeout, maximo):
+            abertos.append((host, ip))
+            return 302, {"location": "http://intranet.exemplo/admin"}, b""
+        with self.assertRaises(PesquisaIndisponivel):
+            transporte_pagina("https://publico.exemplo/x", abrir=abrir,
+                              resolver=dns({"publico.exemplo": ["93.184.216.34"],
+                                            "intranet.exemplo": ["10.1.2.3"]}))
+        self.assertEqual(abertos, [("publico.exemplo", "93.184.216.34")])
+
+    def test_conecta_no_ip_conferido_e_preserva_o_nome(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        vistos = []
+
+        class Pagina(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_GET(self):
+                vistos.append(self.headers.get("Host"))
+                corpo = b"<p>ola</p>"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(corpo)))
+                self.end_headers()
+                self.wfile.write(corpo)
+
+        servidor = ThreadingHTTPServer(("127.0.0.1", 0), Pagina)
+        threading.Thread(target=servidor.serve_forever, daemon=True).start()
+        porta = servidor.server_address[1]
+        try:
+            # Só o teste libera loopback, para exercitar a conexão presa ao IP.
+            tipo, corpo, final, truncado = transporte_pagina(
+                f"http://pagina.exemplo:{porta}/x", resolver=dns({"pagina.exemplo": ["127.0.0.1"]}),
+                permitido=lambda ip: True)
+        finally:
+            servidor.shutdown()
+            servidor.server_close()
+        self.assertEqual(vistos, [f"pagina.exemplo:{porta}"])
+        self.assertIn("ola", corpo)
+        self.assertTrue(tipo.startswith("text/html"))
+        self.assertFalse(truncado)
+
+    def test_resolver_publico_exige_resposta(self):
+        with self.assertRaises(PesquisaIndisponivel):
+            resolver_publico("sumido.exemplo", 80, dns({}))
 
 
 if __name__ == "__main__":

@@ -96,10 +96,15 @@ A abertura tem guarda de sobra, porque abrir endereço arbitrário é o risco:
 - **Timeout, tamanho máximo e allowlist de tipo.** Só `text/html`,
   `application/xhtml+xml` e `text/plain` viram texto; o resto é reportado como
   não legível. A leitura corta em um mega-byte por padrão (`pesquisa_max_bytes`).
-- **Endereço público apenas.** Esquema `http`/`https`, e endereços internos
-  (`localhost`, `127.*`, `10.*`, `192.168.*`, `169.254.*`, `172.16–31.*`) são
-  recusados, para uma página não conseguir fazer o Zeus varrer a rede local.
-  Redirecionamento não é seguido às cegas: cada salto é conferido.
+- **Endereço público apenas, conferido no DNS.** Esquema `http`/`https`; o
+  nome é resolvido e, se **qualquer** endereço devolvido não for internet
+  pública — loopback, rede de casa, link-local, IPv6 local, a faixa
+  `100.64.0.0/10` do Tailscale, multicast —, a página é recusada antes de
+  conectar. A conexão é aberta exatamente no IP conferido, com o nome original
+  no `Host` e no TLS, para que um segundo DNS não troque o destino. Cada
+  redirecionamento passa pelas mesmas portas. Antes, o filtro olhava só o
+  texto do nome, e `[::1]`, IP decimal, `.local` e nomes públicos que apontam
+  para 127.0.0.1 passavam.
 - **Teto de páginas por consulta** (`pesquisa_max_paginas`, três por padrão) e
   cache próprio: a mesma página não é reaberta.
 - **A barreira da #9 continua valendo.** O conteúdo aberto é dado, não
