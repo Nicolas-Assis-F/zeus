@@ -27,19 +27,26 @@ class Servidor(unittest.TestCase):
     def tearDown(self):
         self.hud.parar()
 
-    def pedir(self, caminho, dados=None, chave="chave-secreta", corpo_bruto=None):
+    def pedir(self, caminho, dados=None, chave="chave-secreta", corpo_bruto=None,
+              cabecalhos=None, com_resposta=False):
+        # A chave vai por cabeçalho: pela URL ela não vale mais (ficava em
+        # histórico, favorito e log).
         url = f"http://127.0.0.1:{self.porta}{caminho}"
-        if chave is not None:
-            url += f"?chave={chave}"
         corpo = corpo_bruto if corpo_bruto is not None else (
             json.dumps(dados).encode("utf-8") if dados is not None else None)
         pedido = urllib.request.Request(url, data=corpo,
                                         method="POST" if corpo is not None else "GET")
+        if chave is not None:
+            pedido.add_header("X-Zeus-Chave", chave)
+        for nome, valor in (cabecalhos or {}).items():
+            pedido.add_header(nome, valor)
         try:
             with urllib.request.urlopen(pedido, timeout=5) as resposta:
-                return resposta.status, resposta.read()
+                saida = (resposta.status, resposta.read())
+                return saida + (resposta.headers,) if com_resposta else saida
         except urllib.error.HTTPError as erro:
-            return erro.code, erro.read()
+            saida = (erro.code, erro.read())
+            return saida + (erro.headers,) if com_resposta else saida
 
     def test_exige_chave_para_dado_e_nao_para_a_pagina(self):
         self.assertEqual(self.pedir("/", chave=None)[0], 200)
@@ -94,7 +101,7 @@ class Servidor(unittest.TestCase):
             self.assertNotIn(proibido, pagina, proibido)
         # O único envio de mídia que existe é o do áudio da escuta, que é
         # explícito, com botão próprio, e vai para a transcrição local.
-        self.assertEqual(pagina.count("/escuta?chave="), 1)
+        self.assertEqual(pagina.count('"/escuta"'), 1)
 
     def test_a_camera_comeca_desligada_e_avisa_enquanto_estiver_ligada(self):
         from zeus.hud.servidor import PAGINA
@@ -145,8 +152,9 @@ class Servidor(unittest.TestCase):
         recebido = []
 
         def ouvir():
-            url = f"http://127.0.0.1:{self.porta}/fluxo?chave=chave-secreta"
-            with urllib.request.urlopen(url, timeout=8) as fluxo:
+            pedido = urllib.request.Request(f"http://127.0.0.1:{self.porta}/fluxo",
+                                            headers={"X-Zeus-Chave": "chave-secreta"})
+            with urllib.request.urlopen(pedido, timeout=8) as fluxo:
                 for linha in fluxo:
                     if linha.startswith(b"data: "):
                         recebido.append(json.loads(linha[6:].decode("utf-8")))
@@ -162,6 +170,113 @@ class Servidor(unittest.TestCase):
         ouvinte.join(timeout=5)
         self.assertEqual(recebido[0]["modelo"], "outro-modelo")
         self.assertEqual(self.hud.estado()["modelo"], "outro-modelo")
+
+
+class Sessao(unittest.TestCase):
+    """Achado S4: a chave viajava na URL, era impressa no log e não tinha
+    limite de tentativas. Agora vira sessão por cookie, uma vez."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.arquivo = Path(self.temp.name) / "hud" / "sessoes.json"
+        self.agora = [1_000_000.0]
+        self.hud = self.novo()
+
+    def novo(self, **extras):
+        opcoes = dict(enfileirar=lambda _: None, chave="chave-secreta", host="127.0.0.1",
+                      porta=0, estado=RETRATO, arquivo_de_sessoes=self.arquivo,
+                      relogio=lambda: self.agora[0])
+        opcoes.update(extras)
+        hud = ServidorHUD(**opcoes)
+        hud.porta_real = hud.iniciar()
+        return hud
+
+    def tearDown(self):
+        self.hud.parar()
+        self.temp.cleanup()
+
+    def pedir(self, caminho, dados=None, biscoito=None, cabecalhos=None, hud=None):
+        hud = hud or self.hud
+        corpo = json.dumps(dados).encode() if dados is not None else None
+        pedido = urllib.request.Request(f"http://127.0.0.1:{hud.porta_real}{caminho}", data=corpo,
+                                        method="POST" if corpo is not None else "GET")
+        if biscoito:
+            pedido.add_header("Cookie", biscoito)
+        for nome, valor in (cabecalhos or {}).items():
+            pedido.add_header(nome, valor)
+        try:
+            with urllib.request.urlopen(pedido, timeout=5) as resposta:
+                return resposta.status, json.loads(resposta.read() or b"{}"), resposta.headers
+        except urllib.error.HTTPError as erro:
+            return erro.code, json.loads(erro.read() or b"{}"), erro.headers
+
+    def entrar(self, chave="chave-secreta", hud=None):
+        codigo, _, cabecalhos = self.pedir("/sessao", {"chave": chave}, hud=hud)
+        biscoito = (cabecalhos.get("Set-Cookie") or "").split(";")[0]
+        return codigo, biscoito, cabecalhos.get("Set-Cookie") or ""
+
+    def test_chave_na_url_nao_abre_mais_rota_de_dado(self):
+        self.assertEqual(self.pedir("/estado?chave=chave-secreta")[0], 401)
+
+    def test_chave_certa_vira_cookie_httponly_e_strict(self):
+        codigo, biscoito, completo = self.entrar()
+        self.assertEqual(codigo, 200)
+        self.assertIn("HttpOnly", completo)
+        self.assertIn("SameSite=Strict", completo)
+        self.assertNotIn("chave-secreta", completo)
+        self.assertEqual(self.pedir("/estado", biscoito=biscoito)[0], 200)
+        self.assertTrue(self.pedir("/sessao", biscoito=biscoito)[1]["autenticado"])
+
+    def test_sair_revoga_a_sessao(self):
+        _, biscoito, _ = self.entrar()
+        self.assertEqual(self.pedir("/sessao/sair", {}, biscoito=biscoito)[0], 200)
+        self.assertEqual(self.pedir("/estado", biscoito=biscoito)[0], 401)
+
+    def test_tentativas_erradas_tem_limite_mesmo_para_a_chave_certa(self):
+        for _ in range(5):
+            self.assertEqual(self.entrar("errada")[0], 401)
+        codigo, _, _ = self.pedir("/sessao", {"chave": "chave-secreta"})[:3]
+        self.assertEqual(codigo, 429)
+        self.agora[0] += 61
+        self.assertEqual(self.entrar()[0], 200)
+
+    def test_mutacao_de_outra_origem_e_recusada(self):
+        _, biscoito, _ = self.entrar()
+        codigo = self.pedir("/mensagem", {"texto": "oi"}, biscoito=biscoito,
+                            cabecalhos={"Origin": "https://outro.exemplo"})[0]
+        self.assertEqual(codigo, 403)
+
+    def test_sessao_sobrevive_ao_reinicio_e_o_arquivo_so_tem_hash(self):
+        _, biscoito, _ = self.entrar()
+        token = biscoito.split("=", 1)[1]
+        self.hud.parar()
+        self.hud = self.novo()
+        self.assertEqual(self.pedir("/estado", biscoito=biscoito)[0], 200)
+        conteudo = self.arquivo.read_text()
+        self.assertNotIn(token, conteudo)
+        self.assertEqual(oct(self.arquivo.stat().st_mode & 0o777), "0o600")
+        self.agora[0] += 31 * 24 * 3600
+        self.assertEqual(self.pedir("/estado", biscoito=biscoito)[0], 401)
+
+    def test_codigo_de_pareamento_vale_uma_vez_e_expira(self):
+        self.hud.parar()
+        self.hud = self.novo(chave="", codigo_unico="codigo-de-teste")
+        self.assertEqual(self.entrar("codigo-de-teste")[0], 200)
+        self.assertEqual(self.entrar("codigo-de-teste")[0], 401)
+        outro = self.novo(chave="", codigo_unico="outro-codigo")
+        try:
+            self.agora[0] += 16 * 60
+            self.assertEqual(self.entrar("outro-codigo", hud=outro)[0], 401)
+        finally:
+            outro.parar()
+
+    def test_a_chave_nao_vai_para_o_log_nem_para_o_navegador(self):
+        from zeus.hud.servidor import PAGINA
+        principal = (Path(__file__).resolve().parents[1] / "src/zeus/__main__.py").read_text()
+        self.assertNotIn("?chave={chave}", principal)
+        pagina = PAGINA.read_text(encoding="utf-8")
+        self.assertNotIn('sessionStorage.setItem("zeus_chave"', pagina)
+        self.assertNotIn("chave=\" + encodeURIComponent(CHAVE)", pagina)
 
 
 class VozAusente(unittest.TestCase):

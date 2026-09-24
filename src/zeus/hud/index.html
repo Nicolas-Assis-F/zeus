@@ -190,9 +190,10 @@
 <body>
 <div id="porta"><form onsubmit="guardarChave(event)">
   <canvas id="orbePorta" width="280" height="280" style="width:112px;height:112px;margin:0 auto"></canvas>
-  <p style="color:var(--suave);font-size:13px;margin:0">Esta interface pede a chave definida em <code>chave_hud</code>.</p>
-  <input id="campoChave" type="password" placeholder="chave de acesso" autocomplete="off">
+  <p style="color:var(--suave);font-size:13px;margin:0">Esta interface pede a chave definida em <code>chave_hud</code> ou o código de pareamento impresso ao iniciar.</p>
+  <input id="campoChave" type="password" placeholder="chave ou código" autocomplete="off">
   <button type="submit">Entrar</button>
+  <p id="erroPorta" role="alert" style="color:var(--ambar);font-size:12px;margin:0;min-height:16px"></p>
 </form></div>
 
 <nav id="barraTopo">
@@ -317,21 +318,41 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 
-/* ---------------------------------------------------------------- chave */
-function chaveGuardada(){
-  const daUrl = new URLSearchParams(location.search).get("chave");
-  if (daUrl) { try { sessionStorage.setItem("zeus_chave", daUrl); } catch(e){} return daUrl; }
-  try { return sessionStorage.getItem("zeus_chave") || ""; } catch(e){ return ""; }
+/* --------------------------------------------------------------- sessão */
+/* A chave nunca fica na URL nem no navegador: ela vai uma vez, por POST, e
+   volta como cookie HttpOnly. Um endereço antigo com ?chave= ainda funciona
+   uma vez — a página troca pela sessão e apaga a chave da barra e do
+   histórico —, mas o servidor não aceita mais chave na URL de dado. */
+async function entrarCom(segredo){
+  const r = await fetch("/sessao", {method:"POST", headers:{"Content-Type":"application/json"},
+                                     body: JSON.stringify({chave: segredo})});
+  if (r.status === 429) throw new Error("Tentativas demais. Espere um minuto.");
+  if (!r.ok) throw new Error("Chave ou código inválido.");
 }
-let CHAVE = chaveGuardada();
-function guardarChave(evento){
+async function guardarChave(evento){
   evento.preventDefault();
-  CHAVE = $("campoChave").value.trim();
-  try { sessionStorage.setItem("zeus_chave", CHAVE); } catch(e){}
-  $("porta").classList.remove("aberta");
-  iniciar();
+  const campo = $("campoChave");
+  try{
+    await entrarCom(campo.value.trim());
+    campo.value = "";
+    $("porta").classList.remove("aberta");
+    iniciar();
+  }catch(e){ $("erroPorta").textContent = e.message; }
 }
 function pedirChave(){ $("porta").classList.add("aberta"); }
+async function abrirSessao(){
+  const daUrl = new URLSearchParams(location.search).get("chave");
+  if (daUrl){
+    history.replaceState(null, "", location.pathname);
+    try{ await entrarCom(daUrl); }catch(e){ $("erroPorta").textContent = e.message; }
+  }
+  try{
+    const r = await fetch("/sessao");
+    const estado = await r.json();
+    if (estado.autenticado) return iniciar();
+  }catch(e){}
+  pedirChave();
+}
 
 /* ------------------------------------------------------------- formatos */
 const NADA = "—";
@@ -800,7 +821,7 @@ function criarMapa(elemento, aoMover){
         if (!img){
           img = document.createElement("img");
           img.loading = "lazy"; img.alt = "";
-          img.src = "/mapa/tela/" + chave + ".png?chave=" + encodeURIComponent(CHAVE);
+          img.src = "/mapa/tela/" + chave + ".png";
           img.onerror = () => { img.style.visibility = "hidden"; };
           elemento.appendChild(img);
           imagens.set(chave + "@" + tx, img);
@@ -890,7 +911,7 @@ let MAPA_LOCAL = null, MAPA_GRANDE = null, PINOS = [];
 async function ligarMapaLocal(){
   MAPA_LOCAL = criarMapa($("telaLocal"));
   try{
-    const r = await fetch("/mapa?chave=" + encodeURIComponent(CHAVE));
+    const r = await fetch("/mapa");
     if (r.status === 503){
       // Desligado é diferente de inalcançável, e dizer a coisa errada manda
       // Nicolas procurar problema de rede que não existe.
@@ -920,7 +941,7 @@ async function procurarLugar(){
   if (termo.length < 2 || !MAPA_LOCAL) return;
   campo.disabled = true;
   try{
-    const r = await fetch("/mensagem?chave=" + encodeURIComponent(CHAVE), {
+    const r = await fetch("/mensagem", {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({texto: "onde fica " + termo})});
     if (r.ok) escrever("nicolas", "onde fica " + termo);
@@ -1062,7 +1083,7 @@ function pintarSaude(s){
 
 async function lerSaude(){
   try{
-    const r = await fetch("/saude?chave=" + encodeURIComponent(CHAVE));
+    const r = await fetch("/saude");
     if (!r.ok) return;
     pintarSaude(await r.json());
   }catch(e){ /* o painel de saúde não derruba a conversa */ }
@@ -1127,7 +1148,7 @@ async function enviar(){
   escrever("nicolas", texto);
   mudarEstado("pensando", "gerando resposta");
   try{
-    const resposta = await fetch("/mensagem?chave=" + encodeURIComponent(CHAVE), {
+    const resposta = await fetch("/mensagem", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({texto})
     });
@@ -1149,7 +1170,7 @@ function pararAudio(){ if (AUDIO){ AUDIO.onended = null; AUDIO.pause(); AUDIO = 
 function tocar(url){
   try{
     if (AUDIO) { AUDIO.pause(); }
-    AUDIO = new Audio(url + (url.includes("?") ? "&" : "?") + "chave=" + encodeURIComponent(CHAVE));
+    AUDIO = new Audio(url);
     mudarEstado("falando", "voz local");
     AUDIO.onended = () => mudarEstado("ocioso", NADA);
     AUDIO.play().catch(() => mudarEstado("ocioso", NADA));
@@ -1192,7 +1213,7 @@ async function alternarGravacao(){
       AGUARDANDO = true;
       mudarEstado("ouvindo","enviando para transcrever");
       try{
-        const r = await fetch("/escuta?chave=" + encodeURIComponent(CHAVE), {
+        const r = await fetch("/escuta", {
           method:"POST", headers:{"Content-Type": audio.type}, body: audio});
         if (!r.ok) throw new Error(r.status);
       }catch(e){
@@ -1320,7 +1341,7 @@ function pintarEstado(estado){
 }
 async function carregarEstado(){
   try{
-    const r = await fetch("/estado?chave=" + encodeURIComponent(CHAVE));
+    const r = await fetch("/estado");
     if (r.status === 401){ pedirChave(); return; }
     const estado = await r.json();
     pintarEstado(estado);
@@ -1388,7 +1409,7 @@ $("barraTopo").addEventListener("click", (e) => {
 let fluxo = null;
 function abrirFluxo(){
   if (fluxo) fluxo.close();
-  fluxo = new EventSource("/fluxo?chave=" + encodeURIComponent(CHAVE));
+  fluxo = new EventSource("/fluxo");
   fluxo.onopen = () => mudarEstado("ocioso", NADA);
   fluxo.onerror = () => mudarEstado("offline","reconectando");
   fluxo.onmessage = (evento) => {
@@ -1443,9 +1464,9 @@ function iniciar(){
   clearInterval(relogioDeSaude);
   relogioDeSaude = setInterval(() => { if (!document.hidden) lerSaude(); }, 2000);
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden && CHAVE) lerSaude(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) lerSaude(); });
 animar();
-if (CHAVE) iniciar(); else pedirChave();
+abrirSessao();
 </script>
 </body>
 </html>
