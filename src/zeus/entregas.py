@@ -240,7 +240,35 @@ class Entregas:
         return achadas.pop() if len(achadas) == 1 else None
 
     def entradas(self):
-        return [dict(r) for r in self.db.execute("SELECT id, situacao, recebida_em, resposta FROM entradas WHERE situacao!='respondida' ORDER BY id LIMIT 50")]
+        """Entradas ainda não respondidas, com os efeitos já iniciados no turno.
+
+        Quem decide reprocessar precisa saber o que pode se repetir; sem o
+        registro, a lista diz "nenhum efeito" e isso seria mentira."""
+        linhas = [dict(r) for r in self.db.execute(
+            "SELECT id, situacao, recebida_em, resposta FROM entradas "
+            "WHERE situacao!='respondida' ORDER BY id LIMIT 50")]
+        for linha in linhas:
+            linha["efeitos"] = self.efeitos_do_turno(linha.get("resposta"))
+            linha["efeitos_rastreados"] = bool(linha.get("resposta")) and self.db.execute(
+                "SELECT 1 FROM kv WHERE chave=?", (MARCA_DE_EFEITOS + linha["resposta"],)).fetchone() is not None
+        return linhas
+
+    def efeitos_do_turno(self, chave):
+        """Ferramentas com efeito iniciadas no turno ligado a esta chave."""
+        if not chave:
+            return []
+        feitos = []
+        for linha in self.db.execute(
+                "SELECT ev.tipo, ev.dados FROM eventos ev JOIN episodios ep ON ev.episodio = ep.id "
+                "WHERE ep.tipo = 'efeitos_do_turno' AND ep.resumo = ? ORDER BY ev.id",
+                ("turno:" + chave,)):
+            try:
+                fase = json.loads(linha["dados"]).get("fase")
+            except (TypeError, ValueError):
+                fase = None
+            if fase in ("iniciada", "concluida") and linha["tipo"] not in feitos:
+                feitos.append(linha["tipo"])
+        return feitos
 
     def resolver_entrada(self, identificador, acao):
         if acao not in ('reprocessar', 'descartar'):

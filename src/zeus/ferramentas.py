@@ -209,10 +209,12 @@ class Ferramentas:
         # Guardar aqui evita que o núcleo tenha que entender de mapa.
         self.ultimos_lugares = []
         self.fontes_do_turno = {}
+        self.fontes_lidas = set()
 
     def iniciar_turno(self, texto_de_nicolas: str = ""):
         """Cada turno começa sem fontes: identificador de ontem não abre nada."""
         self.fontes_do_turno = {}
+        self.fontes_lidas = set()
         for indice, url in enumerate(URL_NO_TEXTO.findall(texto_de_nicolas or "")[:5], 1):
             self.fontes_do_turno[f"U{indice}"] = url.rstrip(".,;:!?")
 
@@ -231,6 +233,11 @@ class Ferramentas:
 
     def catalogo(self):
         return CATALOGO
+
+    def fontes_para_mostrar(self):
+        """Fontes do turno como a interface mostra: id, endereço, se foi lida."""
+        return [{"id": chave, "url": url, "lida": url in self.fontes_lidas}
+                for chave, url in self.fontes_do_turno.items()]
 
     @staticmethod
     def efeito(nome: str) -> str:
@@ -384,6 +391,7 @@ class Ferramentas:
                             "endereços que Nicolas escreveu (U1...). Conhecidas agora: "
                             f"{conhecidas}.", "externo": False}
         leitura = self.pesquisa.ler(url, foco=str(argumentos.get("foco", "")))
+        self.fontes_lidas.add(url)
         leitura["externo"] = True
         if not leitura.get("legivel", True):
             leitura["instrucao"] = ("Não deu para ler essa página. Diga isso a Nicolas "

@@ -1,5 +1,6 @@
 """Trabalho de rede e síntese fora da thread que possui a memória do Zeus."""
 
+import json
 import queue
 import time
 from threading import Event, Lock, Thread
@@ -227,6 +228,7 @@ class SupervisorPresenca:
             monitor = MonitorModelo(store, self.verificar or sonda, preferido)
             proxima_sonda = 0.0
             ciclos = 0
+            ultima_difusao, ultimo_conteudo = 0.0, None
             self.pronto.set()
             while not self.parado.is_set():
                 inicio = time.monotonic()
@@ -249,9 +251,20 @@ class SupervisorPresenca:
                             'entradas': fila.entradas(), 'operacao': self.operacao.retrato(),
                             'perguntas': store.perguntas_abertas(), 'lembretes': store.agenda_pendente(),
                             'turnos': store.turnos(20)}, difundir=False)
-                        self.hud.publicar('operacao', capacidades=self.operacao.retrato(),
-                                          entregas=fila.listar(20), entradas=fila.entradas(),
-                                          perguntas=store.perguntas_abertas(), lembretes=store.agenda_pendente())
+                        # Difundir só quando algo muda de verdade. O contador de
+                        # ciclos muda sempre: fica fora da comparação, senão toda
+                        # volta viraria evento e a sequência perderia sentido.
+                        carga = dict(capacidades=self.operacao.retrato(),
+                                     entregas=fila.listar(20), entradas=fila.entradas(),
+                                     perguntas=store.perguntas_abertas(),
+                                     lembretes=store.agenda_pendente())
+                        comparavel = json.dumps({**carga, "capacidades": {
+                            k: {c: v for c, v in d.items()
+                                if c not in ("ciclos", "ultimo_ciclo_s", "atualizado_em")}
+                            for k, d in carga["capacidades"].items()}}, sort_keys=True, default=str)
+                        if comparavel != ultimo_conteudo or time.monotonic() - ultima_difusao > 30:
+                            self.hud.publicar('operacao', **carga)
+                            ultimo_conteudo, ultima_difusao = comparavel, time.monotonic()
                 except Exception:
                     self.operacao.atualizar('agenda', estado='degradada')
                 self.parado.wait(min(max(self.config.intervalo_agenda, 0.1), 1))
