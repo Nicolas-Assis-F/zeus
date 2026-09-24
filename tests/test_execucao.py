@@ -104,10 +104,12 @@ class ExecucaoConcorrente(unittest.TestCase):
             fala.falar('antiga', antiga)
             self.assertTrue(iniciou.wait(1))
             atual = fala.invalidar()
-            fala.falar('nova', atual)
+            fala.falar('nova', atual, 'turno-novo')
             liberar.set()
             self.assertTrue(terminou.wait(1))
-            self.assertEqual(publicados, [('audio', {'audio': '/audio/nova.wav', 'geracao': atual})])
+            # O áudio leva o turno: um evento antigo nunca toca num turno novo.
+            self.assertEqual(publicados, [('audio', {'audio': '/audio/nova.wav', 'geracao': atual,
+                                                     'turno': 'turno-novo'})])
         finally:
             liberar.set()
             fala.parar()

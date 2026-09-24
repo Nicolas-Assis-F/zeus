@@ -1,6 +1,7 @@
 """Trabalho de rede e síntese fora da thread que possui a memória do Zeus."""
 
 import queue
+import time
 from threading import Event, Lock, Thread
 
 
@@ -11,6 +12,10 @@ class CaixaDeEntrada(queue.Queue):
         self.acordar = Event()
 
     def put(self, item, block=True, timeout=None):
+        # O carimbo de chegada é o começo da espera em fila. Relógio
+        # monotônico: a hora de parede pode andar para trás, a espera não.
+        if isinstance(item, dict):
+            item.setdefault("recebido_em", time.monotonic())
         super().put(item, block, timeout)
         self.acordar.set()
 
@@ -66,9 +71,12 @@ class RecepcaoTelegram:
 
 
 class FalaEmSegundoPlano:
-    """Publica WAV depois do texto; descarta fala ultrapassada por novo turno."""
-    def __init__(self, voz, publicar):
+    """Publica WAV depois do texto; descarta fala ultrapassada por novo turno.
+
+    `ao_medir` recebe quanto a síntese levou, por turno, sem o texto falado."""
+    def __init__(self, voz, publicar, ao_medir=None):
         self.voz, self.publicar = voz, publicar
+        self.ao_medir = ao_medir
         self._trava = Lock()
         self._acordar = Event()
         self._parado = Event()
@@ -83,11 +91,21 @@ class FalaEmSegundoPlano:
             self._pendente = None
             return self._geracao
 
-    def falar(self, texto, geracao):
+    def falar(self, texto, geracao, turno=None):
         with self._trava:
             if geracao == self._geracao and not self._parado.is_set():
-                self._pendente = (texto, geracao)
+                self._pendente = (texto, geracao, turno)
                 self._acordar.set()
+
+    def _medir(self, turno, geracao, inicio, caracteres, resultado):
+        if self.ao_medir is None:
+            return
+        try:
+            self.ao_medir({"tipo": "voz", "v": 1, "turno": turno, "geracao": geracao,
+                           "sintese_ms": round((time.monotonic() - inicio) * 1000, 1),
+                           "caracteres": caracteres, "resultado": resultado})
+        except Exception:
+            pass
 
     def _rodar(self):
         while not self._parado.is_set():
@@ -97,14 +115,20 @@ class FalaEmSegundoPlano:
                 pedido, self._pendente = self._pendente, None
             if pedido is None:
                 continue
-            texto, geracao = pedido
+            texto, geracao, turno = pedido
+            inicio = time.monotonic()
             try:
                 arquivo = self.voz.falar(texto)
                 with self._trava:
-                    if arquivo and geracao == self._geracao and not self._parado.is_set():
-                        self.publicar("audio", audio=f"/audio/{arquivo.name}", geracao=geracao)
+                    atual = geracao == self._geracao and not self._parado.is_set()
+                    if arquivo and atual:
+                        self.publicar("audio", audio=f"/audio/{arquivo.name}", geracao=geracao,
+                                      turno=turno)
+                self._medir(turno, geracao, inicio, len(texto),
+                            "sem_audio" if not arquivo else ("ok" if atual else "descartada"))
             except Exception:
                 # Texto já foi entregue; falha opcional não mata o próximo áudio.
+                self._medir(turno, geracao, inicio, len(texto), "erro")
                 continue
 
     def parar(self):

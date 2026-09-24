@@ -1,0 +1,18 @@
+{
+ "id": "bancada-texto-v1",
+ "sobre": "Roteiro sintético da linha de base. Nenhum dado pessoal: pode rodar em qualquer máquina. Mistura conversa solta, memória, agenda e uma pergunta de mundo, para que as rodadas e as ferramentas apareçam na medida. Mudar o roteiro muda a comparação: crie outro id em vez de editar este.",
+ "turnos": [
+  "oi, Zeus",
+  "tudo certo por aí?",
+  "hoje o dia foi puxado, muita coisa no trabalho",
+  "guarda que minha cor preferida é verde",
+  "me lembra de beber água daqui a 30 minutos",
+  "o que tem pendente para mim?",
+  "qual é a minha cor preferida?",
+  "me conta uma curiosidade rápida sobre o céu",
+  "valeu. e amanhã, como começo o dia com mais calma?",
+  "resume em uma frase o que a gente conversou",
+  "esquece a cor preferida",
+  "boa noite"
+ ]
+}

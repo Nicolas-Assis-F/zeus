@@ -11,10 +11,12 @@ essas fontes sem ser reconstruído.
 """
 
 import json
+import time
 from datetime import datetime, timezone
 
 from .guarda import limpar_resposta
 from .entregas import Entregas
+from .telemetria import Medida
 
 MAXIMO_DE_RODADAS = 3
 
@@ -49,13 +51,16 @@ class Zeus:
         self.capacidades = {"pesquisa": bool(ferramentas.pesquisa and
                                               ferramentas.pesquisa.disponivel())}
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
+        self.ultima_medida = None
+        self._ultima_escolha = {}
 
     # ------------------------------------------------------------ contexto
     def _sistema(self, mensagem: str = ""):
         # A mensagem entra aqui para que a memória possa ser escolhida por
         # relevância: sem ela, a seleção só teria a recência como critério.
-        return self.persona.sistema(
-            fatos=self.store.fatos(),
+        fatos = self.store.fatos()
+        montado = self.persona.montar(
+            fatos=fatos,
             perguntas=self.store.perguntas_abertas(),
             agenda=self.store.agenda_pendente(),
             agora=self.relogio(),
@@ -63,6 +68,15 @@ class Zeus:
             mensagem=mensagem,
             teto=getattr(self.config, "teto_de_contexto", 0),
         )
+        escolha = montado["escolha"]
+        # Só contagens: a medida diz quanto da memória entrou, nunca o quê.
+        self._ultima_escolha = {
+            "fatos": len(fatos),
+            "fatos_no_prompt": len(escolha["nucleo"]) + len(escolha["hipoteses"])
+                               + len(escolha["trazidos"]),
+            "fatos_fora": len(escolha["fora"]),
+        }
+        return montado["texto"]
 
     def _historico(self, mensagem: str = ""):
         # Ordem pensada para o cache do servidor e para o tom: persona e
@@ -76,15 +90,38 @@ class Zeus:
         return mensagens
 
     # ------------------------------------------------------------ conversa
-    def conversar(self, texto: str, canal: str = "cli", ao_receber=None) -> str:
+    def conversar(self, texto: str, canal: str = "cli", ao_receber=None,
+                  medida: Medida = None) -> str:
         """Uma troca. `ao_receber` recebe cada pedaço conforme o modelo escreve.
 
         Um pedaço `None` significa descartar o que já foi mostrado: aconteceu
         de o modelo começar a escrever e então decidir usar uma ferramenta, e
-        o rascunho descartado não pode ficar na tela como se fosse resposta."""
+        o rascunho descartado não pode ficar na tela como se fosse resposta.
+
+        `medida` recebe onde o tempo foi. Sem ela o turno é medido do mesmo
+        jeito e fica em `ultima_medida`, para quem quiser ler depois."""
+        medida = medida if medida is not None else Medida(canal=canal)
+        self.ultima_medida = medida
+        try:
+            final = self._conversar(texto, canal, ao_receber, medida)
+        except Exception as erro:
+            medida.concluir("falhou", erro)
+            raise
+        medida.concluir("concluida")
+        return final
+
+    def _conversar(self, texto, canal, ao_receber, medida):
         agora = self.relogio()
+        medida.etapa("montando_contexto")
+        medida.marcar("contexto_inicio")
         respondida = self._vincular_resposta(texto, agora)
         mensagens = self._historico(texto)
+        medida.marcar("contexto_pronto")
+        medida.contexto = {
+            "mensagens": len(mensagens) + 1,
+            "caracteres": sum(len(m.get("content") or "") for m in mensagens) + len(texto),
+            **self._ultima_escolha,
+        }
         self.store.registrar_turno(canal, "nicolas", texto, agora)
         if respondida:
             mensagens.append({
@@ -104,19 +141,34 @@ class Zeus:
             # confiança no modelo — é a ferramenta de ação não estar mais na mesa.
             catalogo = (self.ferramentas.catalogo_de_leitura() if leu_de_fora
                         else self.ferramentas.catalogo())
-            if em_fluxo:
-                resposta = self.provedor.conversar_em_fluxo(
-                    mensagens,
-                    ferramentas=catalogo,
-                    temperatura=self.config.temperatura_conversa,
-                    ao_receber=ao_receber,
-                )
-            else:
-                resposta = self.provedor.conversar(
-                    mensagens,
-                    ferramentas=catalogo,
-                    temperatura=self.config.temperatura_conversa,
-                )
+            rodada = medida.nova_rodada(len(catalogo or []))
+            medida.etapa("consultando_modelo", rodada=rodada.numero)
+
+            def receber(pedaco, rodada=rodada):
+                if pedaco is not None:
+                    if rodada.primeiro_pedaco is None:
+                        medida.etapa("escrevendo", rodada=rodada.numero)
+                    rodada.pedaco()
+                ao_receber(pedaco)
+
+            try:
+                if em_fluxo:
+                    resposta = self.provedor.conversar_em_fluxo(
+                        mensagens,
+                        ferramentas=catalogo,
+                        temperatura=self.config.temperatura_conversa,
+                        ao_receber=receber,
+                    )
+                else:
+                    resposta = self.provedor.conversar(
+                        mensagens,
+                        ferramentas=catalogo,
+                        temperatura=self.config.temperatura_conversa,
+                    )
+            except Exception as erro:
+                rodada.concluir(erro=erro)
+                raise
+            rodada.concluir(resposta)
             if not resposta.chamadas:
                 break
             if em_fluxo:
@@ -125,22 +177,29 @@ class Zeus:
             for chamada in resposta.chamadas:
                 acao_apos_externo = (leu_de_fora and chamada["nome"]
                                      not in self.ferramentas.NOMES_DE_LEITURA)
+                medida.etapa("executando_ferramenta", ferramenta=chamada["nome"])
+                inicio = time.monotonic()
                 if acao_apos_externo:
                     # Esconder o catálogo não basta: um modelo pequeno emite a
                     # chamada mesmo sem ela ofertada. Quem recusa é o executor —
                     # e recusa tudo que muda estado depois de dado externo entrar.
                     resultado = {"erro": RECUSA_APOS_EXTERNO}
+                    situacao = "recusada"
                 else:
                     resultado = self.ferramentas.executar(chamada["nome"],
                                                           chamada["argumentos"])
+                    situacao = "erro" if resultado.get("erro") else "ok"
                     if resultado.get("externo"):
                         leu_de_fora = True
+                medida.ferramenta(chamada["nome"], inicio, situacao,
+                                  self.ferramentas.efeito(chamada["nome"]))
                 mensagens.append(self.provedor.mensagem_de_ferramenta(
                     chamada, json.dumps(resultado, ensure_ascii=False)))
             if leu_de_fora:
                 mensagens.append({"role": "system", "content": MOLDURA_EXTERNA})
 
         bruto = resposta.texto if resposta else ""
+        medida.marcar("texto_final")
         final = limpar_resposta(bruto)
         if not final:
             final = SEM_RESPOSTA
