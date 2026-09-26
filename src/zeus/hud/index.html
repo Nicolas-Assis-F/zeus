@@ -3,1470 +3,199 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
 <title>Zeus</title>
-<style>
-  :root{
-    --fundo:#06070b; --painel:#0d1017; --painel2:#0a0c12; --linha:#1b2130;
-    --texto:#e8edf7; --suave:#8994ab; --apagado:#5b6478;
-    --azul:#4ca8ff; --violeta:#7a5cff; --nucleo:#eaf4ff;
-    --verde:#3ddc97; --ambar:#ffb454; --vermelho:#ff6b6b;
-    --raio:12px;
-  }
-  *{box-sizing:border-box}
-  html,body{height:100%}
-  body{
-    margin:0; background:
-      radial-gradient(1100px 620px at 12% -10%, rgba(76,168,255,.10), transparent 60%),
-      radial-gradient(900px 560px at 92% 110%, rgba(122,92,255,.10), transparent 60%),
-      var(--fundo);
-    color:var(--texto);
-    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    display:grid; grid-template-columns:300px minmax(0,1fr) 348px;
-    height:100dvh; overflow:hidden;
-  }
-  ::-webkit-scrollbar{width:8px;height:8px}
-  ::-webkit-scrollbar-thumb{background:#1c2432;border-radius:8px}
-
-  /* ---------------------------------------------------------- estruturas */
-  .rail{display:flex; flex-direction:column; min-height:0; overflow-y:auto;
-        padding:16px 14px; gap:14px; background:linear-gradient(180deg,rgba(13,16,23,.72),rgba(8,10,15,.72));}
-  #esquerda{border-right:1px solid var(--linha)}
-  #direita{border-left:1px solid var(--linha)}
-  .cartao{background:var(--painel); border:1px solid var(--linha); border-radius:var(--raio); padding:12px 13px}
-  .cartao h2, .titulo{font-size:10px; letter-spacing:.16em; text-transform:uppercase;
-    color:var(--apagado); margin:0 0 10px; display:flex; align-items:center; gap:8px}
-  .cartao h2 .valor, .titulo .valor{margin-left:auto; text-transform:none; color:var(--texto); letter-spacing:0; text-transform:none; font-size:12px}
-
-  /* ------------------------------------------------------------- plasma */
-  #plasma{position:relative; display:flex; flex-direction:column; align-items:center;
-          padding:18px 12px 14px; overflow:hidden}
-  #plasma::after{content:""; position:absolute; inset:-40% -20% auto; height:220px;
-                 background:radial-gradient(closest-side,rgba(76,168,255,.16),transparent);
-                 pointer-events:none}
-  #orbe{width:186px; height:186px; position:relative; z-index:1}
-  #nomeZeus{font-size:15px; letter-spacing:.34em; margin:10px 0 0; font-weight:600; z-index:1}
-  #estadoTexto{font-size:11px; letter-spacing:.2em; text-transform:uppercase; color:var(--azul);
-               margin-top:6px; font-weight:600}
-  #detalhe{font-size:11.5px; color:var(--suave); margin-top:2px; text-align:center; min-height:17px}
-  #chips{display:flex; flex-wrap:wrap; gap:5px; justify-content:center; margin-top:12px; z-index:1}
-  .chip{font-size:10.5px; letter-spacing:.04em; padding:3px 8px; border-radius:999px;
-        border:1px solid var(--linha); color:var(--apagado); background:var(--painel2); white-space:nowrap}
-  .chip.viva{color:var(--verde); border-color:rgba(61,220,151,.35); background:rgba(61,220,151,.07)}
-  .chip.meia{color:var(--ambar); border-color:rgba(255,180,84,.35); background:rgba(255,180,84,.07)}
-
-  /* ---------------------------------------------------------------- mapa */
-  #mapa{width:100%; height:224px; display:block}
-  #legendaMapa{font-size:10.5px; color:var(--apagado); margin-top:6px; line-height:1.5}
-  .telaDoMapa{position:relative; width:100%; height:224px; overflow:hidden;
-              border-radius:9px; background:#0b0f16; cursor:grab; touch-action:none}
-  .telaDoMapa.arrastando{cursor:grabbing}
-  .telaDoMapa img{position:absolute; width:256px; height:256px; user-select:none;
-                  -webkit-user-drag:none; image-rendering:auto;
-                  filter:invert(1) hue-rotate(185deg) saturate(.55) brightness(.92) contrast(1.05)}
-  .telaDoMapa .pino{position:absolute; width:12px; height:12px; margin:-6px 0 0 -6px;
-                    border-radius:50% 50% 50% 0; transform:rotate(-45deg);
-                    background:var(--azul); box-shadow:0 0 0 2px rgba(7,8,12,.85)}
-  .telaDoMapa .pino.casa{background:var(--verde)}
-  .telaDoMapa .rotuloPino{position:absolute; transform:translate(-50%,-22px);
-                          font-size:10.5px; color:var(--texto); white-space:nowrap;
-                          background:rgba(7,8,12,.82); padding:1px 5px; border-radius:5px;
-                          border:1px solid var(--linha); pointer-events:none}
-  .telaDoMapa .credito{position:absolute; right:4px; bottom:3px; font-size:9px;
-                       color:var(--apagado); background:rgba(7,8,12,.6);
-                       padding:0 4px; border-radius:4px}
-  .telaDoMapa .aviso{position:absolute; inset:0; display:grid; place-items:center;
-                     text-align:center; font-size:11.5px; color:var(--apagado); padding:14px}
-  .ferramentasDoMapa{display:flex; gap:5px; margin-top:7px}
-  .ferramentasDoMapa button{height:24px; padding:0 8px; font-size:11px; border-radius:7px;
-                            color:var(--suave); background:var(--painel2)}
-  .ferramentasDoMapa input{flex:1; min-width:0; height:24px; padding:0 8px; font-size:11px;
-                           border-radius:7px; border:1px solid var(--linha);
-                           background:var(--painel2); color:var(--texto); outline:none}
-  #mapaGrande{position:fixed; inset:0; z-index:12; background:var(--fundo);
-              display:none; flex-direction:column; padding:12px}
-  #mapaGrande.aberto{display:flex}
-  #mapaGrande .telaDoMapa{flex:1; height:auto}
-  #mapaGrande header{display:flex; align-items:center; gap:10px; padding:0 2px 10px}
-
-  /* ------------------------------------------------------------ conversa */
-  #centro{display:flex; flex-direction:column; min-width:0; padding:0 18px}
-  #barraTopo{display:none}
-  #cabecalho{display:flex; align-items:baseline; gap:10px; padding:16px 2px 6px}
-  #cabecalho h1{font-size:13px; margin:0; letter-spacing:.2em; color:var(--suave); font-weight:600}
-  #modeloTopo{font-size:11.5px; color:var(--apagado); margin-left:auto}
-  #conversa{flex:1; overflow-y:auto; padding:8px 2px 16px; display:flex; flex-direction:column; gap:10px}
-  .fala{max-width:min(720px,90%); padding:10px 14px; border-radius:14px; white-space:pre-wrap; word-wrap:break-word}
-  .zeus{background:var(--painel); border:1px solid var(--linha); border-bottom-left-radius:4px}
-  .nicolas{align-self:flex-end; background:linear-gradient(135deg,#2a3c66,#3a2f6b); border-bottom-right-radius:4px}
-  .sistema{align-self:center; font-size:12px; color:var(--suave); background:none; padding:2px; text-align:center}
-  .hora{display:block; margin-top:4px; font-size:10px; color:var(--suave); opacity:.75}
-  .fala.fluindo::after{content:"▌"; color:var(--azul); animation:piscar 1s steps(2) infinite}
-  @keyframes piscar{50%{opacity:0}}
-
-  #entrada{display:flex; gap:8px; padding:8px 2px 18px; align-items:flex-end}
-  textarea{flex:1; resize:none; min-height:46px; max-height:140px; padding:12px 14px;
-    background:var(--painel); color:var(--texto); border:1px solid var(--linha);
-    border-radius:var(--raio); font:inherit; outline:none}
-  textarea:focus{border-color:#2d4a7a}
-  button{border:1px solid var(--linha); background:var(--painel); color:var(--texto);
-    border-radius:var(--raio); padding:0 16px; height:46px; cursor:pointer; font:inherit}
-  button:hover{border-color:#2d4a7a}
-  button[disabled]{opacity:.45; cursor:default}
-  #microfone.ativo{border-color:var(--violeta); color:var(--violeta); box-shadow:0 0 0 3px rgba(122,92,255,.18)}
-
-  /* -------------------------------------------------------------- saúde */
-  .medidores{display:grid; grid-template-columns:1fr 1fr; gap:10px}
-  .medidor{display:flex; flex-direction:column; align-items:center; gap:2px}
-  .medidor canvas{width:92px; height:60px}
-  .medidor .nome{font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--apagado)}
-  .medidor .sub{font-size:10.5px; color:var(--suave)}
-
-  .barra{height:6px; border-radius:6px; background:#141a26; overflow:hidden; margin:5px 0 3px}
-  .barra i{display:block; height:100%; border-radius:6px; background:var(--azul);
-           transition:width .45s ease, background .45s ease}
-  .linhaDado{display:flex; align-items:baseline; gap:8px; font-size:12px}
-  .linhaDado .rot{color:var(--suave)} .linhaDado .val{margin-left:auto; font-variant-numeric:tabular-nums}
-  .nucleos{display:flex; gap:2px; align-items:flex-end; height:28px; margin-top:9px;
-           background:#0f1420; border:1px solid #141b28; border-radius:5px; padding:2px}
-  .nucleos i{flex:1; background:#1d2838; border-radius:2px; min-height:2px;
-             transition:height .4s ease, background .4s ease}
-  #faixaCpu{width:100%; height:34px; display:block; margin-top:8px}
-  .sep{height:1px; background:var(--linha); margin:11px -13px}
-  .obs{font-size:11px; color:var(--apagado); margin:6px 0 0}
-  .quente{color:var(--ambar)} .critico{color:var(--vermelho)} .bom{color:var(--verde)}
-
-  /* --------------------------------------------------------------- abas */
-  .abas{display:flex; gap:4px; margin:0 0 10px; flex-wrap:wrap}
-  .abas button{height:26px; padding:0 10px; font-size:11px; border-radius:8px;
-               color:var(--suave); background:var(--painel2)}
-  .abas button.sel{color:var(--texto); border-color:#2d4a7a; background:#121a28}
-  .abas .conta{font-size:9.5px; color:var(--azul); margin-left:5px}
-  .painelAba{display:none} .painelAba.sel{display:block}
-  ul.lista{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px}
-  ul.lista li{font-size:12.5px; padding:7px 9px; background:var(--painel2);
-              border:1px solid var(--linha); border-radius:9px}
-  ul.lista li span{display:block; color:var(--apagado); font-size:10.5px; margin-top:2px}
-  .vazio{color:var(--apagado); font-size:11.5px}
-
-  /* -------------------------------------------------------------- gestos */
-  #gestos{display:flex; align-items:center; gap:8px; margin-top:10px; width:100%}
-  #gestos button{height:26px; padding:0 10px; font-size:11px; border-radius:8px;
-                 color:var(--suave); background:var(--painel2)}
-  #gestos button.ligado{color:var(--violeta); border-color:rgba(122,92,255,.45);
-                        background:rgba(122,92,255,.10)}
-  #olho{width:74px; height:56px; border-radius:7px; background:#0b0f16;
-        border:1px solid var(--linha); display:none}
-  #olho.vendo{display:block}
-  #luzDaCamera{display:none; align-items:center; gap:5px; font-size:10px;
-               letter-spacing:.08em; color:var(--vermelho)}
-  #luzDaCamera.acesa{display:flex}
-  #luzDaCamera i{width:7px; height:7px; border-radius:50%; background:var(--vermelho);
-                 animation:respirar 1.4s ease-in-out infinite}
-  @keyframes respirar{50%{opacity:.25}}
-  #dicaGesto{font-size:10.5px; color:var(--apagado); margin:6px 0 0; text-align:center}
-
-  /* --------------------------------------------------------------- porta */
-  #porta{position:fixed; inset:0; background:var(--fundo); display:none; place-items:center; z-index:9}
-  #porta.aberta{display:grid}
-  #porta form{display:flex; flex-direction:column; gap:10px; width:min(320px,86vw); text-align:center}
-  #porta input{padding:12px; border-radius:10px; border:1px solid var(--linha);
-               background:var(--painel); color:var(--texto); font:inherit}
-
-  /* ------------------------------------------------------------ estreito */
-  @media (max-width:1180px){ body{grid-template-columns:260px minmax(0,1fr) 312px} }
-  @media (max-width:980px){
-    body{grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr)}
-    .rail{display:none; padding-top:6px}
-    #centro{padding-top:0}
-    body.ver-saude #direita, body.ver-mapa #esquerda{display:flex; grid-row:2}
-    body.ver-saude #centro, body.ver-mapa #centro{display:none}
-    #barraTopo{display:flex; gap:6px; padding:10px 14px 4px; grid-row:1}
-    #barraTopo button{height:30px; padding:0 12px; font-size:12px; border-radius:9px; color:var(--suave)}
-    #barraTopo button.sel{color:var(--texto); border-color:#2d4a7a; background:#121a28}
-    #orbe{width:150px;height:150px}
-  }
-</style>
+<link rel="stylesheet" href="/estatico/zeus.css">
 </head>
-<body>
-<div id="porta"><form onsubmit="guardarChave(event)">
-  <canvas id="orbePorta" width="280" height="280" style="width:112px;height:112px;margin:0 auto"></canvas>
-  <p style="color:var(--suave);font-size:13px;margin:0">Esta interface pede a chave definida em <code>chave_hud</code> ou o código de pareamento impresso ao iniciar.</p>
-  <input id="campoChave" type="password" placeholder="chave ou código" autocomplete="off">
-  <button type="submit">Entrar</button>
-  <p id="erroPorta" role="alert" style="color:var(--ambar);font-size:12px;margin:0;min-height:16px"></p>
-</form></div>
+<body data-vista="conversa">
+<a class="pular" href="#texto">Ir para o campo de conversa</a>
 
-<nav id="barraTopo">
-  <button data-vista="conversa" class="sel">Conversa</button>
-  <button data-vista="saude">Saúde</button>
-  <button data-vista="mapa">Mapa</button>
-</nav>
-
-<!-- ============================================================ esquerda -->
-<aside class="rail" id="esquerda">
-  <div class="cartao" id="plasma">
-    <canvas id="orbe" width="372" height="372"></canvas>
-    <p id="nomeZeus">ZEUS</p>
-    <div id="estadoTexto">ocioso</div>
-    <div id="detalhe">—</div>
-    <div id="chips"></div>
-    <div id="gestos">
-      <button id="ligarCamera" title="Gestos pela webcam">✋ gestos</button>
-      <span id="luzDaCamera"><i></i>CÂMERA LIGADA</span>
-      <canvas id="olho" width="160" height="120"></canvas>
-    </div>
-    <p id="dicaGesto">Desligado. O vídeo nunca sai deste navegador.</p>
-  </div>
-
-  <div class="cartao">
-    <div class="abas" id="abasMapa">
-      <button data-aba="sistema" class="sel">Sistema</button>
-      <button data-aba="local">Localização</button>
-      <span class="valor" id="contaMapa" style="margin-left:auto;font-size:10.5px;color:var(--apagado)">—</span>
-    </div>
-    <div class="painelAba sel" data-aba="sistema">
-      <canvas id="mapa" width="640" height="432"></canvas>
-      <p id="legendaMapa">Cada nó é uma capacidade. Aceso quer dizer verificada agora;
-         âmbar, presente mas sem confirmação; apagado, ausente.</p>
-    </div>
-    <div class="painelAba" data-aba="local">
-      <div class="telaDoMapa" id="telaLocal"></div>
-      <div class="ferramentasDoMapa">
-        <input id="buscaLugar" placeholder="rua, bairro, cidade…" autocomplete="off">
-        <button id="expandirMapa" title="Tela cheia">⤢</button>
-      </div>
-      <p id="legendaLocal" style="font-size:10.5px;color:var(--apagado);margin:6px 0 0">
-        Telas do OpenStreetMap, buscadas pelo Zeus e guardadas em disco: depois da
-        primeira olhada o mapa funciona sem rede.</p>
-    </div>
-  </div>
-</aside>
-
-<div id="mapaGrande">
-  <header>
-    <b style="font-size:12px;letter-spacing:.16em;color:var(--suave)">LOCALIZAÇÃO</b>
-    <span id="coordGrande" style="font-size:11px;color:var(--apagado)"></span>
-    <button id="fecharMapa" style="margin-left:auto;height:30px">Fechar</button>
-  </header>
-  <div class="telaDoMapa" id="telaGrande"></div>
+<!-- ================================================================ porta -->
+<div id="porta" hidden>
+  <form id="formPorta" autocomplete="off">
+    <canvas id="orbePorta" width="240" height="240" aria-hidden="true"></canvas>
+    <h1 style="margin:0;font-size:20px;letter-spacing:.3em">ZEUS</h1>
+    <p>Digite a chave definida em <code>chave_hud</code> ou o código de pareamento
+       que o Zeus imprimiu ao iniciar.</p>
+    <label class="oculto-visual" for="campoChave">Chave ou código</label>
+    <input id="campoChave" type="password" placeholder="chave ou código" required>
+    <button class="botao primario" type="submit">Entrar</button>
+    <p id="erroPorta" role="alert"></p>
+  </form>
 </div>
 
-<!-- ============================================================== centro -->
-<main id="centro">
-  <div id="cabecalho">
-    <h1>CONVERSA</h1>
-    <span id="modeloTopo">—</span>
+<!-- ================================================================= topo -->
+<header class="topo">
+  <div class="marca"><canvas id="orbeTopo" width="80" height="80" aria-hidden="true"></canvas><b>ZEUS</b></div>
+  <nav class="vistas" aria-label="Áreas">
+    <button type="button" data-vista="hoje">Hoje</button>
+    <button type="button" data-vista="conversa" aria-current="page">Conversa</button>
+    <button type="button" data-vista="pendencias" id="botaoPendencias">Pendências<span class="conta" id="contaPendencias"></span></button>
+    <button type="button" data-vista="diagnostico">Diagnóstico</button>
+  </nav>
+  <div class="sinais" aria-label="Estado das capacidades">
+    <span class="sinal" id="sinalModelo" title="modelo"><i></i><span class="val">modelo: verificando</span></span>
+    <span class="sinal" id="sinalMicrofone" title="microfone"><i></i><span class="val">microfone: verificando</span></span>
+    <span class="sinal" id="sinalConexao" title="conexão"><i></i><span class="val">conectando</span></span>
   </div>
-  <div id="conversa"></div>
-  <div id="entrada">
-    <textarea id="texto" rows="1" placeholder="Fale com o Zeus…"></textarea>
-    <button id="microfone" title="Falar">🎙</button>
-    <button id="enviar">Enviar</button>
+  <div class="acoes">
+    <button type="button" class="botao discreto pequeno" id="sair" title="Encerrar a sessão neste aparelho"><span class="rot">Sair</span><span aria-hidden="true">⏻</span></button>
   </div>
+</header>
+
+<!-- ================================================================ agora -->
+<div class="agora" id="agora" role="status" aria-live="polite" data-estado="ocioso">
+  <span class="ponto" aria-hidden="true"></span>
+  <span class="rotulo">Agora</span>
+  <span class="texto" id="agoraTexto">Carregando o estado do Zeus…</span>
+  <span class="tempo" id="agoraTempo"></span>
+  <span class="acoes">
+    <button type="button" class="botao pequeno" id="pararAudio" hidden>Parar áudio</button>
+  </span>
+</div>
+<div class="faixa-aviso" id="faixaAviso" role="alert" hidden></div>
+
+<main id="principal">
+  <!-- ============================================================== hoje -->
+  <section class="vista" id="vista-hoje" aria-labelledby="tituloHoje">
+    <div class="pagina">
+      <div class="heroi">
+        <canvas id="orbeHoje" width="256" height="256" aria-hidden="true"></canvas>
+        <div>
+          <h1 id="tituloHoje">Olá.</h1>
+          <p id="hojeEstado">Carregando…</p>
+        </div>
+      </div>
+      <div class="cartoes">
+        <div class="cartao"><h2>Próximos na agenda <span class="valor" id="hojeAgendaConta"></span></h2>
+          <ul class="lista-simples" id="hojeAgenda"></ul></div>
+        <div class="cartao"><h2>Precisa de você <span class="valor" id="hojeAtencaoConta"></span></h2>
+          <ul class="lista-simples" id="hojeAtencao"></ul>
+          <p style="margin:10px 0 0"><button type="button" class="botao pequeno" data-ir="pendencias">Ver pendências</button></p></div>
+        <div class="cartao"><h2>Conversa recente</h2>
+          <ul class="lista-simples" id="hojeConversa"></ul>
+          <p style="margin:10px 0 0"><button type="button" class="botao pequeno" data-ir="conversa">Continuar a conversa</button></p></div>
+        <div class="cartao"><h2>Capacidades</h2><div class="caps" id="hojeCapacidades"></div>
+          <p class="obs">Estado verificado pelo próprio Zeus. Detalhes em Diagnóstico.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================== conversa -->
+  <section class="vista ativa" id="vista-conversa" aria-label="Conversa">
+    <div class="coluna-conversa">
+      <div id="historico" role="log" aria-label="Histórico da conversa" tabindex="0"></div>
+      <button type="button" class="botao pequeno novas" id="novas" hidden>Novas mensagens ↓</button>
+      <div class="oculto-visual" id="anunciador" aria-live="polite"></div>
+      <form class="entrada" id="formEntrada">
+        <div class="resposta-a" id="respostaA" hidden>
+          <span id="respostaATexto"></span>
+          <button type="button" class="botao discreto" id="cancelarResposta" aria-label="Não responder a esta pergunta">✕</button>
+        </div>
+        <div class="linha-entrada">
+          <label class="oculto-visual" for="texto">Mensagem para o Zeus</label>
+          <textarea id="texto" rows="1" placeholder="Fale com o Zeus…" enterkeyhint="send"></textarea>
+          <button type="button" class="botao" id="microfone" aria-pressed="false" title="Falar">🎙<span class="oculto-visual">Gravar áudio</span></button>
+          <button type="submit" class="botao primario" id="enviar">Enviar</button>
+        </div>
+        <p class="nota-entrada" id="notaEntrada"></p>
+      </form>
+    </div>
+
+    <!-- painel contextual: pendências, memória e mapa -->
+    <aside id="painel" aria-label="Pendências e contexto">
+      <div class="painel-topo">
+        <div class="abas" role="tablist" aria-label="Contexto">
+          <button type="button" role="tab" id="aba-pendencias" aria-controls="painel-pendencias" aria-selected="true">Pendências<span class="conta" id="contaAba"></span></button>
+          <button type="button" role="tab" id="aba-memoria" aria-controls="painel-memoria" aria-selected="false">Memória</button>
+          <button type="button" role="tab" id="aba-mapa" aria-controls="painel-mapa" aria-selected="false">Mapa</button>
+        </div>
+        <button type="button" class="botao discreto pequeno" id="recolherPainel" style="margin-left:auto" aria-label="Recolher painel">⟩</button>
+      </div>
+      <div class="painel-corpo" role="tabpanel" id="painel-pendencias" aria-labelledby="aba-pendencias">
+        <p class="retorno" id="retornoPendencia" role="status"></p>
+        <h3>Precisa de você</h3><ul class="itens" id="listaAtencao"></ul>
+        <h3>Perguntas do Zeus</h3><ul class="itens" id="listaPerguntas"></ul>
+        <h3>Lembretes</h3><ul class="itens" id="listaLembretes"></ul>
+      </div>
+      <div class="painel-corpo" role="tabpanel" id="painel-memoria" aria-labelledby="aba-memoria" hidden>
+        <p class="obs" style="margin-top:0">Fatos confirmados, como estão no banco. Para corrigir ou
+           esquecer, peça na conversa; a edição por aqui ainda não existe.</p>
+        <ul class="itens" id="listaMemoria"></ul>
+      </div>
+      <div class="painel-corpo" role="tabpanel" id="painel-mapa" aria-labelledby="aba-mapa" hidden>
+        <div class="telaDoMapa" id="telaLocal"></div>
+        <p class="obs">Telas do OpenStreetMap, buscadas pelo Zeus e guardadas em disco. Arraste
+           para mover; roda do mouse para aproximar. Peça “onde fica…” na conversa para marcar.</p>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ======================================================= diagnóstico -->
+  <section class="vista" id="vista-diagnostico" aria-labelledby="tituloDiag">
+    <div class="pagina">
+      <h1 id="tituloDiag" style="font-size:20px;margin:0 0 14px">Diagnóstico</h1>
+      <div class="cartoes">
+        <div class="cartao"><h2>Processador e vídeo <span class="valor" id="tempoLigado">—</span></h2>
+          <div class="medidores">
+            <div class="medidor"><canvas id="anelCpu" width="224" height="144" aria-hidden="true"></canvas>
+              <div class="nome">CPU</div><div class="sub" id="subCpu">—</div></div>
+            <div class="medidor"><canvas id="anelGpu" width="224" height="144" aria-hidden="true"></canvas>
+              <div class="nome">GPU</div><div class="sub" id="subGpu">—</div></div>
+          </div>
+          <div class="nucleos" id="nucleos" aria-hidden="true"></div>
+          <canvas id="faixaCpu" width="660" height="80" aria-hidden="true"></canvas>
+          <p class="obs" id="obsCpu">—</p></div>
+        <div class="cartao"><h2>Memória, disco e rede</h2>
+          <div class="linha-dado"><span class="rot">memória</span><span class="val" id="valMem">—</span></div>
+          <div class="barra"><i id="barraMem"></i></div>
+          <div class="linha-dado"><span class="rot">swap</span><span class="val" id="memSwap">—</span></div>
+          <div class="linha-dado"><span class="rot">VRAM</span><span class="val" id="vram">—</span></div>
+          <div class="barra"><i id="barraVram"></i></div>
+          <div class="linha-dado"><span class="rot">GPU</span><span class="val" id="gpuTermico">—</span></div>
+          <div class="linha-dado"><span class="rot">disco do estado</span><span class="val" id="valDisco">—</span></div>
+          <div class="barra"><i id="barraDisco"></i></div>
+          <div class="linha-dado"><span class="rot">rede</span><span class="val" id="rede">—</span></div>
+          <div class="linha-dado"><span class="rot">processo do Zeus</span><span class="val" id="processo">—</span></div>
+          <p class="obs" id="obsSaude"></p></div>
+        <div class="cartao"><h2>Capacidades <span class="valor" id="contaMapa">—</span></h2>
+          <canvas id="mapaCapacidades" width="640" height="480" aria-hidden="true"></canvas>
+          <ul class="lista-simples" id="listaCapacidades"></ul></div>
+        <div class="cartao"><h2>Operação</h2><ul class="lista-simples" id="listaOperacao"></ul></div>
+      </div>
+      <div class="cartao" style="margin-top:14px"><h2>Últimos turnos medidos <span class="valor" id="obsMedidas"></span></h2>
+        <div class="tabela"><table>
+          <thead><tr><th>Hora</th><th>Canal</th><th>Resultado</th><th>Fila</th><th>Contexto</th>
+            <th>Rodadas</th><th>Prompt avaliado</th><th>1º fragmento final</th><th>Total</th></tr></thead>
+          <tbody id="tabelaMedidas"></tbody></table></div>
+        <p class="obs">Tempos medidos no servidor com relógio monotônico. “—” é medida ausente, não zero;
+           passe o mouse para ver o motivo. Nada do que foi dito entra aqui.</p></div>
+      <div class="cartoes" style="margin-top:14px">
+        <div class="cartao"><h2>Aparência</h2>
+          <label class="interruptor"><input type="checkbox" id="economia"> Economia: sem animação contínua e saúde a cada 10 s</label>
+          <p class="obs">O sistema também pode pedir movimento reduzido; ele é respeitado sempre.</p></div>
+        <div class="cartao"><h2>Gestos pela webcam <span class="valor">experimental</span></h2>
+          <p class="obs" style="margin-top:0">Detecta presença, posição e aceno por cor de pele e movimento.
+             Não reconhece dedos. O vídeo não sai deste navegador; nada é gravado.</p>
+          <p style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="botao pequeno" id="ligarCamera" aria-pressed="false">Ligar gestos</button>
+            <span class="luz-camera" id="luzDaCamera" hidden><i></i>CÂMERA LIGADA</span></p>
+          <canvas id="olho" width="160" height="120" hidden aria-label="O que a câmera vê, reduzido"></canvas>
+          <p class="obs" id="dicaGesto">Desligado.</p></div>
+      </div>
+    </div>
+  </section>
 </main>
 
-<!-- ============================================================== direita -->
-<aside class="rail" id="direita">
-  <div class="cartao">
-    <h2>Sinais vitais <span class="valor" id="tempoLigado">—</span></h2>
-    <div class="medidores">
-      <div class="medidor"><canvas id="anelCpu" width="184" height="120"></canvas>
-        <div class="nome">CPU</div><div class="sub" id="subCpu">—</div></div>
-      <div class="medidor"><canvas id="anelGpu" width="184" height="120"></canvas>
-        <div class="nome">GPU</div><div class="sub" id="subGpu">—</div></div>
-    </div>
-    <div class="nucleos" id="nucleos"></div>
-    <canvas id="faixaCpu" width="660" height="68"></canvas>
-    <p class="obs" id="obsCpu">—</p>
-  </div>
-
-  <div class="cartao">
-    <h2>Memória <span class="valor" id="valMem">—</span></h2>
-    <div class="barra"><i id="barraMem" style="width:0"></i></div>
-    <div class="linhaDado"><span class="rot">em uso</span><span class="val" id="memUso">—</span></div>
-    <div class="linhaDado"><span class="rot">swap</span><span class="val" id="memSwap">—</span></div>
-    <div class="sep"></div>
-    <h2>Vídeo <span class="valor" id="nomeGpu">sem placa NVIDIA</span></h2>
-    <div class="barra"><i id="barraVram" style="width:0"></i></div>
-    <div class="linhaDado"><span class="rot">VRAM</span><span class="val" id="vram">—</span></div>
-    <div class="linhaDado"><span class="rot">temperatura / potência</span><span class="val" id="gpuTermico">—</span></div>
-    <div class="sep"></div>
-    <h2>Disco <span class="valor" id="valDisco">—</span></h2>
-    <div class="barra"><i id="barraDisco" style="width:0"></i></div>
-    <div class="linhaDado"><span class="rot">livre para a memória do Zeus</span><span class="val" id="discoLivre">—</span></div>
-    <div class="linhaDado"><span class="rot">rede</span><span class="val" id="rede">—</span></div>
-    <div class="linhaDado"><span class="rot">processo do Zeus</span><span class="val" id="processo">—</span></div>
-  </div>
-
-  <div class="cartao">
-    <div class="abas" id="abas">
-      <button data-aba="perguntas" class="sel">Perguntas<span class="conta" id="cPerguntas"></span></button>
-      <button data-aba="agenda">Agenda<span class="conta" id="cAgenda"></span></button>
-      <button data-aba="entregas">Pendências<span class="conta" id="cEntregas"></span></button>
-      <button data-aba="fatos">Memória<span class="conta" id="cFatos"></span></button>
-      <button data-aba="operacao">Operação</button>
-    </div>
-    <div class="painelAba sel" data-aba="perguntas"><ul class="lista" id="perguntas"></ul></div>
-    <div class="painelAba" data-aba="agenda"><ul class="lista" id="agenda"></ul></div>
-    <div class="painelAba" data-aba="entregas"><ul class="lista" id="entregas"></ul></div>
-    <div class="painelAba" data-aba="fatos"><ul class="lista" id="fatos"></ul></div>
-    <div class="painelAba" data-aba="operacao"><ul class="lista" id="operacao"></ul></div>
-  </div>
-</aside>
-
-<script>
-"use strict";
-const $ = (id) => document.getElementById(id);
-
-/* --------------------------------------------------------------- sessão */
-/* A chave nunca fica na URL nem no navegador: ela vai uma vez, por POST, e
-   volta como cookie HttpOnly. Um endereço antigo com ?chave= ainda funciona
-   uma vez — a página troca pela sessão e apaga a chave da barra e do
-   histórico —, mas o servidor não aceita mais chave na URL de dado. */
-async function entrarCom(segredo){
-  const r = await fetch("/sessao", {method:"POST", headers:{"Content-Type":"application/json"},
-                                     body: JSON.stringify({chave: segredo})});
-  if (r.status === 429) throw new Error("Tentativas demais. Espere um minuto.");
-  if (!r.ok) throw new Error("Chave ou código inválido.");
-}
-async function guardarChave(evento){
-  evento.preventDefault();
-  const campo = $("campoChave");
-  try{
-    await entrarCom(campo.value.trim());
-    campo.value = "";
-    $("porta").classList.remove("aberta");
-    iniciar();
-  }catch(e){ $("erroPorta").textContent = e.message; }
-}
-function pedirChave(){ $("porta").classList.add("aberta"); }
-async function abrirSessao(){
-  const daUrl = new URLSearchParams(location.search).get("chave");
-  if (daUrl){
-    history.replaceState(null, "", location.pathname);
-    try{ await entrarCom(daUrl); }catch(e){ $("erroPorta").textContent = e.message; }
-  }
-  try{
-    const r = await fetch("/sessao");
-    const estado = await r.json();
-    if (estado.autenticado) return iniciar();
-  }catch(e){}
-  pedirChave();
-}
-
-/* ------------------------------------------------------------- formatos */
-const NADA = "—";
-function bytes(v){
-  if (v === null || v === undefined || isNaN(v)) return NADA;
-  const u = ["B","KB","MB","GB","TB"]; let i = 0; v = Number(v);
-  while (v >= 1024 && i < u.length-1){ v /= 1024; i++; }
-  return (v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)) + " " + u[i];
-}
-function porcento(v){ return (v === null || v === undefined || isNaN(v)) ? NADA : Math.round(v) + "%"; }
-function duracao(s){
-  if (!s && s !== 0) return NADA;
-  const d = Math.floor(s/86400), h = Math.floor(s%86400/3600), m = Math.floor(s%3600/60);
-  if (d) return d + "d " + h + "h";
-  if (h) return h + "h " + m + "min";
-  return m + "min";
-}
-function faixaDeCor(v, aviso, limite){
-  if (v === null || v === undefined) return "var(--apagado)";
-  if (v >= limite) return "var(--vermelho)";
-  if (v >= aviso) return "var(--ambar)";
-  return "var(--azul)";
-}
-
-/* ----------------------------------------------------------------- orbe */
-let ESTADO = "ocioso";
-const CORES = {
-  ocioso:   ["#4ca8ff", "#7a5cff", 0.55],
-  ouvindo:  ["#7a5cff", "#4ca8ff", 1.15],
-  pensando: ["#4ca8ff", "#eaf4ff", 1.9],
-  falando:  ["#eaf4ff", "#4ca8ff", 1.35],
-  offline:  ["#3a4257", "#2a3040", 0.25],
-};
-/* A carga da máquina entra no desenho: quando o X99 está sob pressão o orbe
-   respira mais rápido. É diagnóstico periférico — dá para sentir sem ler. */
-let CARGA_VISUAL = 0;
-function desenharOrbe(tela, lado){
-  const ctx = tela.getContext("2d");
-  const r = lado/2, t = performance.now()/1000;
-  const [a, b, base] = CORES[ESTADO] || CORES.ocioso;
-  const ritmo = base * (1 + CARGA_VISUAL * 0.9);
-  ctx.clearRect(0,0,lado,lado);
-
-  const pulso = 1 + 0.06*Math.sin(t*ritmo*2.2);
-  const halo = ctx.createRadialGradient(r,r,r*0.12, r,r,r*0.95*pulso);
-  halo.addColorStop(0, a); halo.addColorStop(0.45, b); halo.addColorStop(1, "rgba(7,8,12,0)");
-  ctx.globalAlpha = 0.5; ctx.fillStyle = halo;
-  ctx.beginPath(); ctx.arc(r,r,r*0.95*pulso,0,Math.PI*2); ctx.fill();
-
-  ctx.globalAlpha = 0.85;
-  for (let i=0;i<3;i++){
-    const fase = t*ritmo*(0.5+i*0.35) + i*2.1;
-    const raio = r*(0.32+i*0.14);
-    ctx.beginPath();
-    ctx.strokeStyle = i%2 ? b : a;
-    ctx.lineWidth = lado/110;
-    ctx.ellipse(r, r, raio, raio*(0.35+0.28*Math.abs(Math.sin(fase))), fase, 0, Math.PI*2);
-    ctx.stroke();
-  }
-
-  /* anel externo: ocupação da CPU, desenhada como arco. */
-  if (ESTADO !== "offline"){
-    ctx.lineWidth = lado/74; ctx.lineCap = "round";
-    ctx.globalAlpha = 0.5; ctx.strokeStyle = "#141d2c";
-    ctx.beginPath(); ctx.arc(r, r, r*0.93, 0, Math.PI*2); ctx.stroke();
-    if (CARGA_VISUAL > 0.01){
-      ctx.globalAlpha = 0.95;
-      ctx.strokeStyle = faixaDeCor(CARGA_VISUAL*100, 70, 90);
-      ctx.beginPath();
-      ctx.arc(r, r, r*0.93, -Math.PI/2, -Math.PI/2 + Math.PI*2*Math.min(1,CARGA_VISUAL));
-      ctx.stroke();
-    }
-  }
-
-  const nucleo = ctx.createRadialGradient(r,r,0, r,r,r*0.3*pulso);
-  nucleo.addColorStop(0, "#ffffff"); nucleo.addColorStop(0.5, a); nucleo.addColorStop(1, "rgba(7,8,12,0)");
-  ctx.globalAlpha = 1; ctx.fillStyle = nucleo;
-  ctx.beginPath(); ctx.arc(r,r,r*0.3*pulso,0,Math.PI*2); ctx.fill();
-}
-function animar(){
-  desenharOrbe($("orbe"), 372);
-  if ($("porta").classList.contains("aberta")) desenharOrbe($("orbePorta"), 280);
-  desenharMapa();
-  requestAnimationFrame(animar);
-}
-function mudarEstado(novo, detalhe){
-  ESTADO = novo;
-  $("estadoTexto").textContent = novo;
-  if (detalhe !== undefined) $("detalhe").textContent = detalhe || NADA;
-}
-
-/* ----------------------------------------------------------- mapa vivo */
-/* O "mapa" honesto hoje é o mapa do próprio Zeus: quais capacidades existem,
-   quais estão verificadas e por onde a conversa passa. Um mapa geográfico
-   viria quando houver sensor com posição — não há, e desenhar um seria
-   enfeite. */
-const NOS = [
-  {id:"modelo",   rot:"modelo"},
-  {id:"memoria",  rot:"memória"},
-  {id:"voz",      rot:"voz"},
-  {id:"ouvidos",  rot:"ouvidos"},
-  {id:"telegram", rot:"telegram"},
-  {id:"hud",      rot:"hud"},
-  {id:"pesquisa", rot:"pesquisa"},
-  {id:"agenda",   rot:"agenda"},
-];
-let MAPA = {};
-function desenharMapa(){
-  const tela = $("mapa");
-  const caixa = tela && ajustarTela(tela); if (!caixa) return;
-  const {L, A, escala} = caixa, ctx = tela.getContext("2d");
-  const cx = L/2, cy = A/2, t = performance.now()/1000;
-  // Raios separados: o rótulo mais largo precisa caber na margem lateral, e
-  // um círculo perfeito numa caixa achatada empurra "pesquisa" para fora.
-  const rx = L*0.27, ry = A*0.34;
-  ctx.clearRect(0,0,L,A);
-  const pos = NOS.map((no,i) => {
-    const ang = -Math.PI/2 + i*(Math.PI*2/NOS.length);
-    return {...no, x:cx + Math.cos(ang)*rx, y:cy + Math.sin(ang)*ry,
-            vida: MAPA[no.id] || "off"};
-  });
-  for (const p of pos){
-    const viva = p.vida === "on";
-    ctx.strokeStyle = viva ? "rgba(76,168,255,.42)"
-      : (p.vida === "meia" ? "rgba(255,180,84,.34)" : "rgba(60,70,92,.55)");
-    ctx.lineWidth = (viva ? 1.1 : .8)*escala;
-    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(p.x,p.y); ctx.stroke();
-    if (viva){                       // pulso caminhando até o núcleo
-      const f = (t*0.45 + p.x*0.004) % 1;
-      const px = p.x + (cx-p.x)*f, py = p.y + (cy-p.y)*f;
-      ctx.fillStyle = "rgba(122,92,255,.85)";
-      ctx.beginPath(); ctx.arc(px,py,1.8*escala,0,Math.PI*2); ctx.fill();
-    }
-  }
-  for (const p of pos){
-    const cor = p.vida === "on" ? "#4ca8ff" : (p.vida === "meia" ? "#ffb454" : "#39415a");
-    ctx.fillStyle = cor; ctx.globalAlpha = p.vida === "off" ? .5 : 1;
-    ctx.beginPath(); ctx.arc(p.x,p.y, (p.vida === "on" ? 4.6 : 3.4)*escala, 0, Math.PI*2); ctx.fill();
-    if (p.vida === "on"){
-      ctx.globalAlpha = .22; ctx.beginPath();
-      ctx.arc(p.x,p.y, (6.5 + 2*Math.sin(t*1.6 + p.y))*escala, 0, Math.PI*2); ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = p.vida === "off" ? "#5b6478" : "#c9d4e8";
-    ctx.font = Math.round(11*escala) + "px ui-sans-serif,system-ui,sans-serif";
-    ctx.textAlign = p.x < cx-6 ? "right" : (p.x > cx+6 ? "left" : "center");
-    ctx.textBaseline = p.y < cy ? "bottom" : "top";
-    const dx = (p.x < cx-6 ? -1 : (p.x > cx+6 ? 1 : 0)) * 11*escala;
-    const dy = (p.y < cy ? -1 : 1) * 9*escala;
-    const margem = 3*escala, largura = ctx.measureText(p.rot).width;
-    let x = p.x + dx;
-    if (ctx.textAlign === "right") x = Math.max(x, margem + largura);
-    if (ctx.textAlign === "left")  x = Math.min(x, L - margem - largura);
-    ctx.fillText(p.rot, x, p.y+dy);
-  }
-  const pulso = (1 + 0.08*Math.sin(t*1.4)) * 17 * escala;
-  const g = ctx.createRadialGradient(cx,cy,0, cx,cy,pulso);
-  g.addColorStop(0,"#ffffff"); g.addColorStop(.45,"#4ca8ff"); g.addColorStop(1,"rgba(7,8,12,0)");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx,cy,pulso,0,Math.PI*2); ctx.fill();
-}
-
-/* Canvas tem dois tamanhos: o de exibição, em CSS, e o do buffer, em pixels.
-   Quando os dois discordam o navegador estica o desenho e o texto sai
-   achatado — foi o que aconteceu com o mapa. Aqui o buffer passa a seguir a
-   caixa real, multiplicada pela densidade da tela. */
-function ajustarTela(tela){
-  const r = tela.getBoundingClientRect();
-  if (!r.width || !r.height) return null;
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const L = Math.round(r.width*dpr), A = Math.round(r.height*dpr);
-  if (tela.width !== L || tela.height !== A){ tela.width = L; tela.height = A; }
-  return {L, A, escala: dpr};
-}
-
-/* ------------------------------------------------------ gestos pela webcam */
-/* Ler a mão sem modelo, sem biblioteca e sem nada saindo do navegador.
-
-   O caminho de landmarks — MediaPipe e parentes — dá dedo por dedo, mas custa
-   um modelo de vários megabytes baixado de algum lugar. Isso conflita com a
-   promessa do Zeus de clonar e rodar, e com a de funcionar sem rede.
-
-   O que dá para fazer com o que já existe no navegador: segmentar pele em
-   YCbCr, cruzar com movimento contra um fundo aprendido, e acompanhar a
-   maior mancha. Isso não distingue dedos. Distingue presença, posição,
-   tamanho e oscilação — que é o suficiente para acenar, apontar e fechar a
-   mão, e é honesto quanto ao que é.
-
-   Tudo acontece em 160x120, a 12 quadros por segundo. Nenhum quadro é
-   enviado a lugar nenhum, nada é gravado, e a câmera só liga por botão.     */
-
-const OLHO_L = 160, OLHO_A = 120, CELULA = 8;
-const QUADROS_POR_SEGUNDO = 12;
-
-function ehPele(r, g, b){
-  /* YCbCr é melhor que RGB para isto: separa luminosidade de cor, então a
-     mesma faixa vale com a luz do abajur e com a da janela. A faixa é a
-     clássica da literatura de segmentação e cobre tons de pele variados —
-     ela erra para madeira e para parede bege, e é por isso que o movimento
-     precisa concordar antes de a mancha valer. */
-  const cb = 128 - 0.168736*r - 0.331264*g + 0.5*b;
-  const cr = 128 + 0.5*r - 0.418688*g - 0.081312*b;
-  const y = 0.299*r + 0.587*g + 0.114*b;
-  return y > 40 && cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173;
-}
-
-function criarOlho(){
-  const colunas = Math.ceil(OLHO_L/CELULA), linhas = Math.ceil(OLHO_A/CELULA);
-  const fundo = new Float32Array(OLHO_L*OLHO_A);     // luminosidade aprendida
-  let aprendido = 0;
-  const grade = new Float32Array(colunas*linhas);
-  const historico = [];
-  let picoDeArea = 0;
-
-  function olhar(dados){
-    /* `dados` é o ImageData do quadro reduzido. Devolve o que se enxerga:
-       presença, centro em 0..1, tamanho relativo e se é um aceno. */
-    grade.fill(0);
-    let soma = 0;
-    for (let i = 0, p = 0; i < dados.length; i += 4, p++){
-      const r = dados[i], g = dados[i+1], b = dados[i+2];
-      const luz = 0.299*r + 0.587*g + 0.114*b;
-      const diferenca = Math.abs(luz - fundo[p]);
-      // O fundo é aprendido devagar: uma mão parada por muito tempo acaba
-      // virando fundo, o que é o comportamento certo para não travar num
-      // encosto de cadeira cor de pele.
-      fundo[p] = aprendido < 20 ? luz : fundo[p]*0.97 + luz*0.03;
-      if (aprendido < 20) continue;
-      if (!ehPele(r, g, b) || diferenca < 12) continue;
-      const x = p % OLHO_L, y = (p / OLHO_L) | 0;
-      grade[((y/CELULA)|0)*colunas + ((x/CELULA)|0)] += 1;
-      soma++;
-    }
-    if (aprendido < 20){ aprendido++; return {aprendendo: true, presente: false}; }
-
-    // Maior mancha conectada na grade grossa. Grade grossa é o que deixa isto
-    // caber em milissegundos: 20x15 células em vez de 19.200 pixels.
-    const vistos = new Uint8Array(colunas*linhas);
-    let melhor = null;
-    for (let c = 0; c < colunas*linhas; c++){
-      if (vistos[c] || grade[c] < CELULA*CELULA*0.25) continue;
-      const fila = [c]; vistos[c] = 1;
-      let peso = 0, sx = 0, sy = 0, n = 0;
-      while (fila.length){
-        const atual = fila.pop();
-        const ax = atual % colunas, ay = (atual / colunas) | 0;
-        peso += grade[atual]; sx += ax*grade[atual]; sy += ay*grade[atual]; n++;
-        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
-          const nx = ax+dx, ny = ay+dy;
-          if (nx < 0 || ny < 0 || nx >= colunas || ny >= linhas) continue;
-          const vizinho = ny*colunas + nx;
-          if (vistos[vizinho] || grade[vizinho] < CELULA*CELULA*0.25) continue;
-          vistos[vizinho] = 1; fila.push(vizinho);
-        }
-      }
-      if (!melhor || peso > melhor.peso)
-        melhor = {peso, x: sx/peso/colunas, y: sy/peso/linhas, celulas: n};
-    }
-    if (!melhor || melhor.peso < 90){ historico.length = 0; return {presente: false}; }
-
-    picoDeArea = Math.max(picoDeArea*0.995, melhor.peso);
-    historico.push({x: melhor.x, y: melhor.y, quando: performance.now()});
-    if (historico.length > 24) historico.shift();
-
-    return {
-      presente: true,
-      x: 1 - melhor.x,                 // espelhado: a tela é um espelho
-      y: melhor.y,
-      area: melhor.peso,
-      abertura: picoDeArea ? melhor.peso/picoDeArea : 1,
-      acenando: contarIdasEVindas() >= 3,
-    };
-  }
-
-  function contarIdasEVindas(){
-    /* Aceno é a mão trocando de direção várias vezes em menos de um segundo.
-       Movimento único, por maior que seja, não conta — senão passar na frente
-       da câmera acordaria o Zeus. */
-    const agora = performance.now();
-    const recentes = historico.filter((h) => agora - h.quando < 1100);
-    let trocas = 0, direcao = 0;
-    for (let i = 1; i < recentes.length; i++){
-      const d = recentes[i].x - recentes[i-1].x;
-      if (Math.abs(d) < 0.02) continue;
-      const nova = d > 0 ? 1 : -1;
-      if (direcao && nova !== direcao) trocas++;
-      direcao = nova;
-    }
-    return trocas;
-  }
-
-  return {olhar, reiniciar(){ aprendido = 0; historico.length = 0; picoDeArea = 0; }};
-}
-
-const OLHO = criarOlho();
-let CAMERA = null, TRILHA_DE_VIDEO = null, RELOGIO_DO_OLHO = null;
-let VIDEO = null, ESPELHO = null, ULTIMO_GESTO = 0, MAO = null;
-
-function dizerGesto(texto){ $("dicaGesto").textContent = texto; }
-
-async function alternarCamera(){
-  if (CAMERA){ desligarCamera("Desligado. O vídeo nunca sai deste navegador."); return; }
-  if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
-    dizerGesto("Este navegador não dá acesso à câmera em origem insegura. Abra por https.");
-    return;
-  }
-  try{
-    TRILHA_DE_VIDEO = await navigator.mediaDevices.getUserMedia({
-      video: {width: 320, height: 240, facingMode: "user"}, audio: false});
-  }catch(e){
-    dizerGesto("A câmera não foi liberada. Sem ela, nada de gestos — e nada mudou.");
-    return;
-  }
-  VIDEO = document.createElement("video");
-  VIDEO.playsInline = true; VIDEO.muted = true; VIDEO.srcObject = TRILHA_DE_VIDEO;
-  await VIDEO.play().catch(() => {});
-  ESPELHO = document.createElement("canvas");
-  ESPELHO.width = OLHO_L; ESPELHO.height = OLHO_A;
-  CAMERA = true;
-  OLHO.reiniciar();
-  $("ligarCamera").classList.add("ligado");
-  $("luzDaCamera").classList.add("acesa");
-  $("olho").classList.add("vendo");
-  dizerGesto("Aprendendo o fundo. Fique parado um instante.");
-  RELOGIO_DO_OLHO = setInterval(umQuadro, Math.round(1000/QUADROS_POR_SEGUNDO));
-}
-
-function desligarCamera(motivo){
-  clearInterval(RELOGIO_DO_OLHO); RELOGIO_DO_OLHO = null;
-  if (TRILHA_DE_VIDEO) TRILHA_DE_VIDEO.getTracks().forEach((t) => t.stop());
-  TRILHA_DE_VIDEO = null; CAMERA = null; VIDEO = null; MAO = null;
-  $("ligarCamera").classList.remove("ligado");
-  $("luzDaCamera").classList.remove("acesa");
-  $("olho").classList.remove("vendo");
-  const tela = $("olho").getContext("2d");
-  tela.clearRect(0, 0, OLHO_L, OLHO_A);
-  dizerGesto(motivo || "Desligado. O vídeo nunca sai deste navegador.");
-}
-
-function umQuadro(){
-  if (!CAMERA || !VIDEO || VIDEO.readyState < 2) return;
-  const ctx = ESPELHO.getContext("2d", {willReadFrequently: true});
-  ctx.drawImage(VIDEO, 0, 0, OLHO_L, OLHO_A);
-  const quadro = ctx.getImageData(0, 0, OLHO_L, OLHO_A);
-  const visto = OLHO.olhar(quadro.data);
-  desenharOlho(quadro, visto);
-  aplicarGesto(visto);
-}
-
-function desenharOlho(quadro, visto){
-  /* A prévia existe para Nicolas ver o que o Zeus vê — e ver que é pouco:
-     160 por 120, dentro do navegador, sem gravar. */
-  const tela = $("olho").getContext("2d");
-  tela.putImageData(quadro, 0, 0);
-  tela.save();
-  tela.fillStyle = "rgba(7,8,12,.45)";
-  tela.fillRect(0, 0, OLHO_L, OLHO_A);
-  if (visto && visto.presente){
-    tela.strokeStyle = visto.acenando ? "#7a5cff" : "#4ca8ff";
-    tela.lineWidth = 2;
-    const x = (1 - visto.x)*OLHO_L, y = visto.y*OLHO_A;
-    tela.beginPath(); tela.arc(x, y, 12 + 10*Math.min(1, visto.abertura), 0, Math.PI*2);
-    tela.stroke();
-  }
-  tela.restore();
-}
-
-/* Os gestos só mexem no que é reversível e visível. Nenhum deles manda
-   mensagem, executa ferramenta ou abre coisa: uma sombra na parede não pode
-   disparar ação no computador de ninguém. */
-function aplicarGesto(visto){
-  if (!visto || visto.aprendendo) return;
-  if (!visto.presente){
-    if (MAO){ MAO = null; dizerGesto("Mão fora de vista."); }
-    return;
-  }
-  const agora = performance.now();
-  const primeiro = !MAO;
-  const anterior = MAO;
-  MAO = visto;
-
-  if (visto.acenando && agora - ULTIMO_GESTO > 1500){
-    ULTIMO_GESTO = agora;
-    /* Aceno pede atenção, não liga microfone: "ouvindo" aqui seria mentira,
-       porque nenhuma captura de áudio começou. */
-    $("texto").focus();
-    dizerGesto("Aceno: campo de conversa em foco. O microfone continua desligado.");
-    return;
-  }
-  if (primeiro){ dizerGesto("Mão à vista. Acene para chamar; mova para arrastar o mapa."); return; }
-
-  // Mão fechada arrasta o mapa; mão aberta só passeia. É o gesto que mais
-  // parece com o que a mão faz de verdade sobre um mapa de papel.
-  const fechada = visto.abertura < 0.6;
-  const painelDoMapa = document.querySelector('.painelAba[data-aba="local"].sel');
-  if (fechada && painelDoMapa && MAPA_LOCAL){
-    const dx = (visto.x - anterior.x), dy = (visto.y - anterior.y);
-    if (Math.abs(dx) > 0.004 || Math.abs(dy) > 0.004){
-      const passo = 220;
-      const centro = MAPA_LOCAL.estado;
-      const escala = Math.pow(2, centro.zoom);
-      centro.lon -= dx*passo/escala*360/256;
-      centro.lat += dy*passo/escala*180/256;
-      MAPA_LOCAL.desenhar();
-      dizerGesto("Mão fechada: arrastando o mapa.");
-    }
-    return;
-  }
-  dizerGesto(fechada ? "Mão fechada." : "Mão aberta em " +
-             Math.round(visto.x*100) + "%, " + Math.round(visto.y*100) + "%.");
-}
-
-/* --------------------------------------------------- mapa de localização */
-/* Um mapa deslizante escrito à mão, em vez de biblioteca.
-
-   O motivo não é orgulho: o Zeus tem que funcionar com a internet caída, e
-   biblioteca de mapa vem de CDN ou de passo de build. São umas cem linhas —
-   a matemática é a projeção do Mercator, e o resto é posicionar imagem.
-
-   As telas vêm do próprio Zeus, nunca do servidor público direto. Ele busca
-   uma vez, guarda em disco e serve dali. O filtro CSS inverte a cor para o
-   mapa claro do OpenStreetMap combinar com o resto da tela, o que também
-   evita ter que hospedar um estilo escuro. */
-const LADO_DA_TELA = 256;
-
-function criarMapa(elemento, aoMover){
-  const estado = {lat: -16.6869, lon: -49.2648, zoom: 13, zoomMaximo: 19,
-                  pinos: [], vivo: false, aviso: ""};
-  const imagens = new Map();
-  let arrastando = null;
-
-  function paraTela(lat, lon, zoom){
-    const n = Math.pow(2, zoom);
-    const limitada = Math.max(-85.05112878, Math.min(85.05112878, lat));
-    const rad = limitada * Math.PI / 180;
-    return {x: (lon + 180) / 360 * n,
-            y: (1 - Math.asinh(Math.tan(rad)) / Math.PI) / 2 * n};
-  }
-  function deTela(x, y, zoom){
-    const n = Math.pow(2, zoom);
-    return {lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI,
-            lon: x / n * 360 - 180};
-  }
-
-  function desenhar(){
-    const L = elemento.clientWidth, A = elemento.clientHeight;
-    if (!L || !A) return;
-    if (estado.aviso){
-      elemento.innerHTML = '<div class="aviso">' + estado.aviso + "</div>";
-      return;
-    }
-    const centro = paraTela(estado.lat, estado.lon, estado.zoom);
-    const meio = {x: L/2, y: A/2};
-    const primeiroX = Math.floor(centro.x - meio.x / LADO_DA_TELA);
-    const primeiroY = Math.floor(centro.y - meio.y / LADO_DA_TELA);
-    const ultimoX = Math.floor(centro.x + meio.x / LADO_DA_TELA);
-    const ultimoY = Math.floor(centro.y + meio.y / LADO_DA_TELA);
-    const limite = Math.pow(2, estado.zoom);
-    const usadas = new Set();
-    for (let tx = primeiroX; tx <= ultimoX; tx++){
-      for (let ty = primeiroY; ty <= ultimoY; ty++){
-        if (ty < 0 || ty >= limite) continue;
-        const enrolado = ((tx % limite) + limite) % limite;   // o mundo dá a volta
-        const chave = estado.zoom + "/" + enrolado + "/" + ty;
-        usadas.add(chave + "@" + tx);
-        let img = imagens.get(chave + "@" + tx);
-        if (!img){
-          img = document.createElement("img");
-          img.loading = "lazy"; img.alt = "";
-          img.src = "/mapa/tela/" + chave + ".png";
-          img.onerror = () => { img.style.visibility = "hidden"; };
-          elemento.appendChild(img);
-          imagens.set(chave + "@" + tx, img);
-        }
-        img.style.left = Math.round(meio.x + (tx - centro.x) * LADO_DA_TELA) + "px";
-        img.style.top  = Math.round(meio.y + (ty - centro.y) * LADO_DA_TELA) + "px";
-      }
-    }
-    for (const [chave, img] of imagens){
-      if (!usadas.has(chave)){ img.remove(); imagens.delete(chave); }
-    }
-    for (const antigo of elemento.querySelectorAll(".pino,.rotuloPino,.credito")) antigo.remove();
-    for (const pino of estado.pinos){
-      const p = paraTela(pino.lat, pino.lon, estado.zoom);
-      const x = meio.x + (p.x - centro.x) * LADO_DA_TELA;
-      const y = meio.y + (p.y - centro.y) * LADO_DA_TELA;
-      if (x < -40 || y < -40 || x > L + 40 || y > A + 40) continue;
-      const marca = document.createElement("div");
-      marca.className = "pino" + (pino.casa ? " casa" : "");
-      marca.style.left = x + "px"; marca.style.top = y + "px";
-      marca.title = pino.nome || "";
-      elemento.appendChild(marca);
-      if (pino.nome && L > 320){
-        const rotulo = document.createElement("div");
-        rotulo.className = "rotuloPino";
-        rotulo.textContent = pino.nome.split(",").slice(0, 2).join(",");
-        rotulo.style.left = x + "px"; rotulo.style.top = y + "px";
-        elemento.appendChild(rotulo);
-      }
-    }
-    const credito = document.createElement("div");
-    credito.className = "credito";
-    credito.textContent = "© OpenStreetMap";
-    elemento.appendChild(credito);
-    if (aoMover) aoMover(estado);
-  }
-
-  elemento.addEventListener("pointerdown", (e) => {
-    arrastando = {x: e.clientX, y: e.clientY};
-    elemento.classList.add("arrastando");
-    elemento.setPointerCapture(e.pointerId);
-  });
-  elemento.addEventListener("pointermove", (e) => {
-    if (!arrastando) return;
-    const dx = e.clientX - arrastando.x, dy = e.clientY - arrastando.y;
-    arrastando = {x: e.clientX, y: e.clientY};
-    const centro = paraTela(estado.lat, estado.lon, estado.zoom);
-    const novo = deTela(centro.x - dx / LADO_DA_TELA, centro.y - dy / LADO_DA_TELA, estado.zoom);
-    estado.lat = novo.lat; estado.lon = novo.lon;
-    desenhar();
-  });
-  const soltar = (e) => { arrastando = null; elemento.classList.remove("arrastando"); };
-  elemento.addEventListener("pointerup", soltar);
-  elemento.addEventListener("pointercancel", soltar);
-  elemento.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    const passo = e.deltaY < 0 ? 1 : -1;
-    const alvo = Math.max(2, Math.min(estado.zoomMaximo, estado.zoom + passo));
-    if (alvo === estado.zoom) return;
-    estado.zoom = alvo;
-    for (const img of imagens.values()) img.remove();
-    imagens.clear();
-    desenhar();
-  }, {passive: false});
-
-  return {
-    estado,
-    desenhar,
-    ir(lat, lon, zoom){
-      estado.lat = lat; estado.lon = lon;
-      if (zoom) estado.zoom = zoom;
-      for (const img of imagens.values()) img.remove();
-      imagens.clear();
-      desenhar();
-    },
-    marcar(pinos){ estado.pinos = pinos || []; desenhar(); },
-    avisar(texto){
-      estado.aviso = texto || "";
-      if (texto){ elemento.innerHTML = ""; imagens.clear(); }
-      desenhar();
-    },
-  };
-}
-
-let MAPA_LOCAL = null, MAPA_GRANDE = null, PINOS = [];
-
-async function ligarMapaLocal(){
-  MAPA_LOCAL = criarMapa($("telaLocal"));
-  try{
-    const r = await fetch("/mapa");
-    if (r.status === 503){
-      // Desligado é diferente de inalcançável, e dizer a coisa errada manda
-      // Nicolas procurar problema de rede que não existe.
-      MAPA_LOCAL.avisar("Mapa desligado. Ligue mapa_ativo na configuração.");
-      return;
-    }
-    if (!r.ok) throw new Error(r.status);
-    const inicio = await r.json();
-    if (!inicio.ativo){
-      MAPA_LOCAL.avisar(inicio.situacao || "mapa desligado");
-      return;
-    }
-    MAPA_LOCAL.estado.zoomMaximo = inicio.zoom_maximo || 19;
-    PINOS = [{lat: inicio.lat, lon: inicio.lon, nome: "aqui", casa: true}];
-    MAPA_LOCAL.marcar(PINOS);
-    MAPA_LOCAL.ir(inicio.lat, inicio.lon, inicio.zoom);
-  }catch(e){
-    MAPA_LOCAL.avisar("Não consegui falar com o mapa do Zeus.");
-  }
-}
-
-/* A busca de lugar passa pelo próprio Zeus, que é quem tem o direito de falar
-   com o serviço público — e quem respeita o limite de um pedido por segundo. */
-async function procurarLugar(){
-  const campo = $("buscaLugar");
-  const termo = campo.value.trim();
-  if (termo.length < 2 || !MAPA_LOCAL) return;
-  campo.disabled = true;
-  try{
-    const r = await fetch("/mensagem", {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({texto: "onde fica " + termo})});
-    if (r.ok) escrever("nicolas", "onde fica " + termo);
-  }catch(e){ /* a conversa responde; o mapa recebe o pino pelo fluxo */ }
-  campo.disabled = false; campo.value = "";
-}
-
-function marcarLugares(lugares){
-  if (!lugares || !lugares.length || !MAPA_LOCAL) return;
-  const novos = lugares.map((l) => ({lat: l.lat, lon: l.lon, nome: l.nome}));
-  PINOS = PINOS.filter((p) => p.casa).concat(novos);
-  MAPA_LOCAL.marcar(PINOS);
-  MAPA_LOCAL.ir(novos[0].lat, novos[0].lon, Math.max(MAPA_LOCAL.estado.zoom, 15));
-  if (MAPA_GRANDE){ MAPA_GRANDE.marcar(PINOS); MAPA_GRANDE.ir(novos[0].lat, novos[0].lon); }
-  for (const b of $("abasMapa").children){
-    if (b.dataset) b.classList.toggle("sel", b.dataset.aba === "local");
-  }
-  for (const painel of document.querySelectorAll('.painelAba[data-aba="sistema"],.painelAba[data-aba="local"]'))
-    painel.classList.toggle("sel", painel.dataset.aba === "local");
-  MAPA_LOCAL.desenhar();
-}
-
-/* ------------------------------------------------------------ medidores */
-function anel(tela, valor, rotulo, cor){
-  const ctx = tela.getContext("2d"), L = tela.width, A = tela.height;
-  const cx = L/2, cy = A*0.86, r = Math.min(L/2, A)*0.78;
-  ctx.clearRect(0,0,L,A);
-  ctx.lineWidth = r*0.22; ctx.lineCap = "round";
-  ctx.strokeStyle = "#141a26";
-  ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,0); ctx.stroke();
-  if (valor !== null && valor !== undefined && !isNaN(valor)){
-    ctx.strokeStyle = cor;
-    ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI, Math.PI + Math.PI*Math.min(1,valor/100)); ctx.stroke();
-  }
-  ctx.fillStyle = "#e8edf7"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-  ctx.font = "600 " + Math.round(r*0.52) + "px ui-sans-serif,system-ui,sans-serif";
-  ctx.fillText(rotulo, cx, cy - r*0.08);
-}
-function faixa(tela, series){
-  const caixa = ajustarTela(tela); if (!caixa) return;
-  const ctx = tela.getContext("2d"), {L, A, escala} = caixa;
-  ctx.clearRect(0,0,L,A);
-  ctx.strokeStyle = "#141a26"; ctx.lineWidth = escala;
-  for (const y of [A*0.25, A*0.5, A*0.75]){
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(L,y); ctx.stroke();
-  }
-  for (const {dados, cor, preenche} of series){
-    const pontos = (dados || []).filter(v => v !== null && v !== undefined);
-    if (pontos.length < 2) continue;
-    const passo = L / Math.max(1, (dados.length - 1));
-    ctx.beginPath();
-    let iniciou = false, ultimoX = 0;
-    dados.forEach((v,i) => {
-      if (v === null || v === undefined) return;
-      const x = i*passo, y = A - (Math.min(100,Math.max(0,v))/100)*(A-3) - 1.5;
-      iniciou ? ctx.lineTo(x,y) : (ctx.moveTo(x,y), iniciou = true);
-      ultimoX = x;
-    });
-    ctx.strokeStyle = cor; ctx.lineWidth = 1.3*escala; ctx.stroke();
-    if (preenche){
-      ctx.lineTo(ultimoX, A); ctx.lineTo(0, A); ctx.closePath();
-      ctx.fillStyle = preenche; ctx.fill();
-    }
-  }
-}
-
-function pintarSaude(s){
-  if (!s) return;
-  const cpu = s.cpu || {}, mem = s.memoria || {}, placa = (s.gpu || [])[0];
-  CARGA_VISUAL = (cpu.uso || 0)/100;
-
-  anel($("anelCpu"), cpu.uso, porcento(cpu.uso), faixaDeCor(cpu.uso, 75, 92));
-  $("subCpu").textContent = [cpu.mhz ? Math.round(cpu.mhz) + " MHz" : null,
-                             cpu.celsius ? cpu.celsius + "°C" : null]
-                            .filter(Boolean).join(" · ") || (cpu.nucleos + " núcleos");
-  anel($("anelGpu"), placa ? placa.uso : null, placa ? porcento(placa.uso) : NADA,
-       faixaDeCor(placa ? placa.uso : null, 80, 95));
-  $("subGpu").textContent = placa
-    ? [placa.celsius ? placa.celsius + "°C" : null,
-       placa.watts ? Math.round(placa.watts) + " W" : null].filter(Boolean).join(" · ") || "ativa"
-    : "sem placa";
-
-  const caixa = $("nucleos");
-  const nucleos = cpu.por_nucleo || [];
-  if (caixa.childElementCount !== nucleos.length){
-    caixa.innerHTML = "";
-    nucleos.forEach(() => caixa.appendChild(document.createElement("i")));
-  }
-  nucleos.forEach((v,i) => {
-    const barra = caixa.children[i];
-    barra.style.height = Math.max(6, (v || 0)) + "%";
-    barra.style.background = faixaDeCor(v, 75, 92);
-  });
-
-  const h = s.historico || {};
-  faixa($("faixaCpu"), [
-    {dados: h.cpu, cor:"#4ca8ff", preenche:"rgba(76,168,255,.13)"},
-    {dados: h.memoria, cor:"#7a5cff"},
-    {dados: h.gpu, cor:"#3ddc97"},
-  ]);
-  const carga = (cpu.carga || [])[0];
-  $("obsCpu").textContent = [
-    cpu.modelo || null,
-    carga !== undefined ? "carga " + carga.toFixed(2) : null,
-  ].filter(Boolean).join(" · ") || NADA;
-  $("tempoLigado").textContent = "ligado há " + duracao(s.tempo_ligado_s);
-
-  $("valMem").textContent = porcento(mem.percentual);
-  $("barraMem").style.width = (mem.percentual || 0) + "%";
-  $("barraMem").style.background = faixaDeCor(mem.percentual, 80, 92);
-  $("memUso").textContent = mem.total ? bytes(mem.usada) + " de " + bytes(mem.total) : NADA;
-  $("memSwap").textContent = mem.troca_total
-    ? bytes(mem.troca_usada) + " de " + bytes(mem.troca_total) : "sem swap";
-
-  $("nomeGpu").textContent = placa ? placa.nome : "sem placa NVIDIA";
-  $("barraVram").style.width = (placa && placa.percentual_memoria || 0) + "%";
-  $("barraVram").style.background = faixaDeCor(placa ? placa.percentual_memoria : null, 85, 95);
-  $("vram").textContent = placa && placa.memoria_total
-    ? bytes(placa.memoria_usada) + " de " + bytes(placa.memoria_total) : NADA;
-  $("gpuTermico").textContent = placa
-    ? [placa.celsius ? placa.celsius + " °C" : null,
-       placa.watts ? Math.round(placa.watts) + (placa.watts_teto ? "/" + Math.round(placa.watts_teto) : "") + " W" : null,
-       placa.ventoinha !== null && placa.ventoinha !== undefined ? "ventoinha " + Math.round(placa.ventoinha) + "%" : null
-      ].filter(Boolean).join(" · ") || NADA
-    : NADA;
-
-  const disco = (s.disco || {}).estado || {};
-  $("valDisco").textContent = porcento(disco.percentual);
-  $("barraDisco").style.width = (disco.percentual || 0) + "%";
-  $("barraDisco").style.background = faixaDeCor(disco.percentual, 85, 94);
-  $("discoLivre").textContent = disco.livre ? bytes(disco.livre) : NADA;
-  const rede = s.rede || {};
-  $("rede").textContent = (rede.entrada === null || rede.entrada === undefined)
-    ? NADA : "↓ " + bytes(rede.entrada) + "/s  ↑ " + bytes(rede.saida) + "/s";
-  const proc = s.processo || {};
-  $("processo").textContent = proc.memoria
-    ? bytes(proc.memoria) + " · " + proc.threads + " threads" : NADA;
-}
-
-async function lerSaude(){
-  try{
-    const r = await fetch("/saude");
-    if (!r.ok) return;
-    pintarSaude(await r.json());
-  }catch(e){ /* o painel de saúde não derruba a conversa */ }
-}
-
-/* ------------------------------------------------------------- conversa */
-function agora(){ return new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); }
-function momento(iso){
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d)) return iso;
-  const mesmoDia = d.toDateString() === new Date().toDateString();
-  return mesmoDia
-    ? d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})
-    : d.toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
-}
-function escrever(quem, texto, hora){
-  const div = document.createElement("div");
-  div.className = "fala " + quem;
-  div.textContent = texto;
-  if (quem !== "sistema"){
-    const marca = document.createElement("span");
-    marca.className = "hora"; marca.textContent = hora || agora();
-    div.appendChild(marca);
-  }
-  $("conversa").appendChild(div);
-  $("conversa").scrollTop = $("conversa").scrollHeight;
-}
-
-let BOLHA = null;
-function fluir(pedaco){
-  if (!BOLHA){
-    BOLHA = document.createElement("div");
-    BOLHA.className = "fala zeus fluindo";
-    BOLHA.dataset.texto = "";
-    $("conversa").appendChild(BOLHA);
-  }
-  BOLHA.dataset.texto += pedaco;
-  BOLHA.textContent = BOLHA.dataset.texto;
-  $("conversa").scrollTop = $("conversa").scrollHeight;
-}
-function descartarFluxo(){ if (BOLHA){ BOLHA.remove(); BOLHA = null; } }
-function fecharFluxo(texto, hora){
-  if (!BOLHA) return false;
-  BOLHA.classList.remove("fluindo");
-  BOLHA.textContent = texto;
-  const marca = document.createElement("span");
-  marca.className = "hora"; marca.textContent = hora || agora();
-  BOLHA.appendChild(marca);
-  BOLHA = null;
-  $("conversa").scrollTop = $("conversa").scrollHeight;
-  return true;
-}
-
-async function enviar(){
-  const campo = $("texto");
-  const texto = campo.value.trim();
-  if (!texto) return;
-  pararAudio();
-  AGUARDANDO = true;
-  campo.value = "";
-  escrever("nicolas", texto);
-  mudarEstado("pensando", "gerando resposta");
-  try{
-    const resposta = await fetch("/mensagem", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({texto})
-    });
-    if (resposta.status === 401) { pedirChave(); return; }
-    if (!resposta.ok) throw new Error(resposta.status);
-  }catch(e){
-    mudarEstado("offline", "falha ao enviar");
-    escrever("sistema", "Não consegui entregar sua mensagem ao Zeus.");
-  }
-}
-$("enviar").onclick = enviar;
-$("texto").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); enviar(); }
-});
-
-/* ----------------------------------------------------------------- fala */
-let AUDIO = null, ULTIMA_GERACAO = 0, AGUARDANDO = false;
-function pararAudio(){ if (AUDIO){ AUDIO.onended = null; AUDIO.pause(); AUDIO = null; } }
-function tocar(url){
-  try{
-    if (AUDIO) { AUDIO.pause(); }
-    AUDIO = new Audio(url);
-    mudarEstado("falando", "voz local");
-    AUDIO.onended = () => mudarEstado("ocioso", NADA);
-    AUDIO.play().catch(() => mudarEstado("ocioso", NADA));
-  }catch(e){ mudarEstado("ocioso", NADA); }
-}
-
-/* ------------------------------------------------------------- microfone */
-/* Dois caminhos, em ordem de honestidade:
-   1. escuta local — o navegador grava e manda o áudio para o Zeus, que
-      transcreve no próprio X99 com faster-whisper. O áudio não sai de casa.
-   2. ditado do navegador — só quando a escuta local não está disponível, e
-      com aviso, porque o áudio vai para o serviço do navegador.
-   getUserMedia exige origem segura: em http puro nenhum dos dois existe.    */
-let OUVIDOS_LOCAIS = false;
-let gravador = null, pedacos = [], gravando = false, limiteDeGravacao = null;
-
-function podeGravar(){
-  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
-}
-
-async function alternarGravacao(){
-  if (gravando){ pararGravacao(); return; }
-  let trilha = null;
-  try{
-    pararAudio();
-    trilha = await navigator.mediaDevices.getUserMedia({audio:{
-      echoCancellation:true, noiseSuppression:true, autoGainControl:true, channelCount:1
-    }});
-    gravador = new MediaRecorder(trilha, MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? {mimeType:"audio/webm;codecs=opus"} : {});
-    pedacos = [];
-    gravador.ondataavailable = (e) => { if (e.data && e.data.size) pedacos.push(e.data); };
-    gravador.onstop = async () => {
-      trilha.getTracks().forEach((t) => t.stop());
-      gravando = false;
-      $("microfone").classList.remove("ativo");
-      clearTimeout(limiteDeGravacao);
-      const audio = new Blob(pedacos, {type: gravador.mimeType || "audio/webm"});
-      if (audio.size < 1200){ mudarEstado("ocioso","áudio curto demais"); return; }
-      AGUARDANDO = true;
-      mudarEstado("ouvindo","enviando para transcrever");
-      try{
-        const r = await fetch("/escuta", {
-          method:"POST", headers:{"Content-Type": audio.type}, body: audio});
-        if (!r.ok) throw new Error(r.status);
-      }catch(e){
-        mudarEstado("offline","falha ao enviar o áudio");
-        escrever("sistema","Não consegui entregar o áudio ao Zeus.");
-      }
-    };
-    gravador.start();
-    gravando = true;
-    $("microfone").classList.add("ativo");
-    mudarEstado("ouvindo","gravando — clique para parar");
-    limiteDeGravacao = setTimeout(pararGravacao, 60000);
-  }catch(e){
-    if (trilha) trilha.getTracks().forEach((t) => t.stop());
-    escrever("sistema","O navegador não liberou o microfone. Em rede local isso costuma ser origem insegura: abra a interface por https.");
-    mudarEstado("ocioso", NADA);
-  }
-}
-function pararGravacao(){ if (gravador && gravando) gravador.stop(); }
-
-const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
-let ditado = null;
-if (Reconhecimento){
-  ditado = new Reconhecimento();
-  ditado.lang = "pt-BR"; ditado.interimResults = false; ditado.continuous = false;
-  ditado.onstart = () => { $("microfone").classList.add("ativo"); mudarEstado("ouvindo","ditado do navegador"); };
-  ditado.onend = () => { $("microfone").classList.remove("ativo"); if (ESTADO === "ouvindo") mudarEstado("ocioso", NADA); };
-  ditado.onresult = (e) => { $("texto").value = ($("texto").value + " " + e.results[0][0].transcript).trim(); enviar(); };
-}
-function ditarPeloNavegador(){
-  if (!sessionStorage.getItem("zeus_ditado_ok")){
-    if (!confirm("A escuta local não está disponível agora. O ditado do navegador envia o áudio para o serviço dele. Usar mesmo assim?")) return;
-    try { sessionStorage.setItem("zeus_ditado_ok","1"); } catch(e){}
-  }
-  try { ditado.start(); } catch(e){}
-}
-$("microfone").onclick = () => {
-  if (OUVIDOS_LOCAIS && podeGravar()) return alternarGravacao();
-  if (ditado) return ditarPeloNavegador();
-  escrever("sistema","Sem escuta: a local não está instalada e este navegador não oferece ditado. Veja docs/INTERFACE_E_VOZ.md.");
-};
-function ajustarMicrofone(estado){
-  OUVIDOS_LOCAIS = !!estado.ouvidos;
-  const local = OUVIDOS_LOCAIS && podeGravar();
-  $("microfone").disabled = !local && !ditado;
-  $("microfone").title = local
-    ? "Falar — transcrição local no Zeus"
-    : (ditado ? "Ditado do navegador (o áudio sai do computador)"
-              : (estado.motivo_ouvidos || "escuta indisponível"));
-}
-
-/* ---------------------------------------------------------------- estado */
-function listar(alvo, itens, vazio, formatar, conta){
-  const lista = $(alvo);
-  lista.innerHTML = "";
-  if (conta) $(conta).textContent = (itens && itens.length) ? itens.length : "";
-  if (!itens || !itens.length){
-    const li = document.createElement("li");
-    li.className = "vazio"; li.style.background = "none"; li.style.border = "none";
-    li.textContent = vazio; lista.appendChild(li); return;
-  }
-  for (const item of itens.slice(0,14)){
-    const li = document.createElement("li");
-    const [titulo, detalhe] = formatar(item);
-    li.textContent = titulo;
-    if (detalhe){ const s = document.createElement("span"); s.textContent = detalhe; li.appendChild(s); }
-    lista.appendChild(li);
-  }
-}
-function pintarOperacao(estado){
-  const atencao = (estado.entregas || []).filter(e => ["incerta","falhou","expirada"].includes(e.situacao));
-  const entradas = (estado.entradas || []).filter(e => e.situacao === "incerta");
-  const itens = atencao.map(e => ({texto:e.texto, detalhe:e.situacao + " · " + e.motivo}));
-  entradas.forEach(() => itens.push({texto:"Mensagem do Telegram precisa de revisão", detalhe:"processamento interrompido"}));
-  listar("entregas", itens, "nenhuma pendência de entrega", e => [e.texto, e.detalhe], "cEntregas");
-  const capacidades = estado.capacidades || estado.operacao || {};
-  listar("operacao", Object.entries(capacidades), "aguardando diagnóstico",
-         e => [e[0].replaceAll("_"," "), e[1].estado]);
-  return capacidades;
-}
-function pintarChips(estado, capacidades){
-  /* Um chip por capacidade, nunca dois: o diagnóstico do supervisor vale
-     mais que o palpite do retrato, então ele sobrescreve pelo mesmo id. */
-  const marcas = new Map([
-    /* O modelo só acende quando respondeu à verificação: o nome configurado
-       não é prova de que ele está de pé. */
-    ["modelo",  [estado.modelo_estado ? estado.modelo_estado === "pronta" : !!estado.modelo,
-                 "modelo", estado.modelo || ((estado.modelo_configurado || "modelo") + " indisponível")]],
-    ["voz",     [!!estado.voz, estado.voz ? "voz local" : "sem voz", ""]],
-    ["ouvidos", [!!estado.ouvidos, estado.ouvidos ? "ouvidos locais" : "sem ouvidos",
-                 estado.motivo_ouvidos || ""]],
-  ]);
-  for (const [nome, info] of Object.entries(capacidades || {})){
-    marcas.set(nome, [info.estado === "ok" ? true : (info.estado ? "meia" : false),
-                      nome.replaceAll("_"," "), info.estado || ""]);
-  }
-  const caixa = $("chips"); caixa.innerHTML = "";
-  for (const [id, [vivo, rotulo, detalhe]] of marcas){
-    const chip = document.createElement("span");
-    chip.className = "chip " + (vivo === true ? "viva" : (vivo === "meia" ? "meia" : ""));
-    chip.textContent = rotulo;
-    if (detalhe) chip.title = detalhe;
-    caixa.appendChild(chip);
-    MAPA[id] = vivo === true ? "on" : (vivo === "meia" ? "meia" : "off");
-  }
-  MAPA.hud = "on";
-  MAPA.memoria = (estado.fatos && estado.fatos.length) ? "on" : "meia";
-  MAPA.agenda = (estado.lembretes && estado.lembretes.length) ? "on" : "meia";
-  if (MAPA.telegram === undefined) MAPA.telegram = "off";
-  if (MAPA.pesquisa === undefined) MAPA.pesquisa = "off";
-  const vivos = Object.values(MAPA).filter(v => v === "on").length;
-  $("contaMapa").textContent = vivos + " de " + Object.keys(MAPA).length + " ativos";
-}
-function pintarEstado(estado){
-  const capacidades = pintarOperacao(estado);
-  listar("perguntas", estado.perguntas, "nenhuma", (p) => [p.texto, p.situacao], "cPerguntas");
-  listar("agenda", estado.lembretes, "nada agendado", (a) => [a.texto, momento(a.vence_em)], "cAgenda");
-  listar("fatos", estado.fatos, "memória vazia", (f) => [f.value, f.key], "cFatos");
-  $("modeloTopo").textContent = estado.modelo
-    ? estado.modelo + (estado.voz ? " · voz local" : " · sem voz")
-                    + (estado.ouvidos ? " · ouvidos locais" : "")
-    : (estado.modelo_configurado ? estado.modelo_configurado + " · indisponível" : "presença local");
-  pintarChips(estado, capacidades);
-  ajustarMicrofone(estado);
-}
-async function carregarEstado(){
-  try{
-    const r = await fetch("/estado");
-    if (r.status === 401){ pedirChave(); return; }
-    const estado = await r.json();
-    pintarEstado(estado);
-    if (estado.turnos && !$("conversa").childElementCount){
-      for (const t of estado.turnos) escrever(t.papel === "zeus" ? "zeus" : "nicolas", t.texto, momento(t.em));
-    }
-  }catch(e){ mudarEstado("offline","sem contato com o Zeus"); }
-}
-
-/* ------------------------------------------------------------------ abas */
-$("abas").addEventListener("click", (e) => {
-  const alvo = e.target.closest("button"); if (!alvo) return;
-  for (const b of $("abas").children) b.classList.toggle("sel", b === alvo);
-  for (const p of document.querySelectorAll(".painelAba"))
-    p.classList.toggle("sel", p.dataset.aba === alvo.dataset.aba);
-});
-$("abasMapa").addEventListener("click", (e) => {
-  const alvo = e.target.closest("button"); if (!alvo) return;
-  for (const b of $("abasMapa").children)
-    if (b.dataset && b.dataset.aba) b.classList.toggle("sel", b === alvo);
-  for (const painel of document.querySelectorAll('.painelAba[data-aba="sistema"],.painelAba[data-aba="local"]'))
-    painel.classList.toggle("sel", painel.dataset.aba === alvo.dataset.aba);
-  if (alvo.dataset.aba === "local" && MAPA_LOCAL) MAPA_LOCAL.desenhar();
-});
-$("buscaLugar").addEventListener("keydown", (e) => {
-  if (e.key === "Enter"){ e.preventDefault(); procurarLugar(); }
-});
-$("expandirMapa").onclick = () => {
-  $("mapaGrande").classList.add("aberto");
-  if (!MAPA_GRANDE){
-    MAPA_GRANDE = criarMapa($("telaGrande"), (s) => {
-      $("coordGrande").textContent = s.lat.toFixed(5) + ", " + s.lon.toFixed(5)
-                                     + "  ·  zoom " + s.zoom;
-    });
-  }
-  MAPA_GRANDE.estado.zoomMaximo = MAPA_LOCAL ? MAPA_LOCAL.estado.zoomMaximo : 19;
-  MAPA_GRANDE.marcar(PINOS);
-  if (MAPA_LOCAL) MAPA_GRANDE.ir(MAPA_LOCAL.estado.lat, MAPA_LOCAL.estado.lon,
-                                 MAPA_LOCAL.estado.zoom);
-};
-$("fecharMapa").onclick = () => $("mapaGrande").classList.remove("aberto");
-$("ligarCamera").onclick = alternarCamera;
-// Aba escondida com a câmera ligada é exatamente o que ninguém quer ver numa
-// luz de webcam. Some a aba, some a câmera.
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden && CAMERA) desligarCamera("Câmera desligada ao sair da aba.");
-});
-window.addEventListener("pagehide", () => { if (CAMERA) desligarCamera(); });
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") $("mapaGrande").classList.remove("aberto");
-});
-window.addEventListener("resize", () => {
-  if (MAPA_LOCAL) MAPA_LOCAL.desenhar();
-  if (MAPA_GRANDE) MAPA_GRANDE.desenhar();
-});
-
-$("barraTopo").addEventListener("click", (e) => {
-  const alvo = e.target.closest("button"); if (!alvo) return;
-  for (const b of $("barraTopo").children) b.classList.toggle("sel", b === alvo);
-  document.body.classList.remove("ver-saude","ver-mapa");
-  if (alvo.dataset.vista !== "conversa") document.body.classList.add("ver-" + alvo.dataset.vista);
-});
-
-/* ----------------------------------------------------------------- fluxo */
-let fluxo = null;
-function abrirFluxo(){
-  if (fluxo) fluxo.close();
-  fluxo = new EventSource("/fluxo");
-  fluxo.onopen = () => mudarEstado("ocioso", NADA);
-  fluxo.onerror = () => mudarEstado("offline","reconectando");
-  fluxo.onmessage = (evento) => {
-    let pacote; try{ pacote = JSON.parse(evento.data); }catch(e){ return; }
-    if (pacote.tipo === "estado"){ pintarEstado(pacote); }
-    else if (pacote.tipo === "saude"){ pintarSaude(pacote); }
-    else if (pacote.tipo === "lugares"){ marcarLugares(pacote.lugares); }
-    else if (pacote.tipo === "operacao"){
-      pintarOperacao(pacote);
-      listar("perguntas", pacote.perguntas, "nenhuma", p => [p.texto, p.situacao], "cPerguntas");
-      listar("agenda", pacote.lembretes, "nada agendado", a => [a.texto, momento(a.vence_em)], "cAgenda");
-    }
-    else if (pacote.tipo === "aviso"){
-      // Aviso não encerra nem descarta a bolha da conversa em andamento.
-      if (pacote.tipo_saida !== "resposta") escrever("zeus", pacote.texto);
-    }
-    else if (pacote.tipo === "fluxo"){
-      if (pacote.reiniciar) descartarFluxo(); else fluir(pacote.pedaco || "");
-      if (ESTADO !== "pensando") mudarEstado("pensando","escrevendo");
-    }
-    else if (pacote.tipo === "audio"){
-      if (!AGUARDANDO && !gravando && pacote.geracao === ULTIMA_GERACAO) tocar(pacote.audio);
-    }
-    else if (pacote.tipo === "mensagem"){
-      const classe = pacote.de === "zeus" ? "zeus" : (pacote.de === "sistema" ? "sistema" : "nicolas");
-      if (classe !== "zeus" || !fecharFluxo(pacote.texto, pacote.hora)){
-        if (classe === "zeus") descartarFluxo();
-        escrever(classe, pacote.texto, pacote.hora);
-      }
-      if (classe === "zeus" || classe === "sistema") AGUARDANDO = false;
-      if (pacote.audio) tocar(pacote.audio); else mudarEstado("ocioso", NADA);
-    }
-    else if (pacote.tipo === "situacao"){
-      if (pacote.geracao !== undefined){
-        ULTIMA_GERACAO = pacote.geracao;
-        AGUARDANDO = true;
-        pararAudio();
-      }
-      mudarEstado(pacote.estado, pacote.detalhe);
-    }
-  };
-}
-
-let relogioDeSaude = null;
-function iniciar(){
-  carregarEstado();
-  abrirFluxo();
-  lerSaude();
-  ligarMapaLocal();
-  /* Fora de foco o painel para: a aba escondida não precisa de /proc, e o
-     X99 tem coisa melhor a fazer do que servir medida para ninguém ver. */
-  clearInterval(relogioDeSaude);
-  relogioDeSaude = setInterval(() => { if (!document.hidden) lerSaude(); }, 2000);
-}
-document.addEventListener("visibilitychange", () => { if (!document.hidden) lerSaude(); });
-animar();
-abrirSessao();
-</script>
+<script src="/estatico/estado.js"></script>
+<script src="/estatico/api.js"></script>
+<script src="/estatico/orbe.js"></script>
+<script src="/estatico/conversa.js"></script>
+<script src="/estatico/pendencias.js"></script>
+<script src="/estatico/voz.js"></script>
+<script src="/estatico/diagnostico.js"></script>
+<script src="/estatico/mapa.js"></script>
+<script src="/estatico/gestos.js"></script>
+<script src="/estatico/app.js"></script>
 </body>
 </html>

@@ -165,12 +165,13 @@ def montar_ouvidos(config, estado):
                    vocabulario=config.escuta_vocabulario)
 
 
-def retrato(store, config, voz, modelo="", ouvidos=None):
+def retrato(store, config, voz, modelo="", ouvidos=None, capacidades=None):
     """O que a HUD mostra: memória confirmada, pendências e conversa recente.
 
     `modelo` é o que respondeu à verificação; vazio quer dizer indisponível.
     O nome configurado vai à parte: mostrá-lo no lugar do verificado fazia a
     interface acender o modelo justamente quando ele estava fora."""
+    entradas = Entregas(store).entradas()
     return {
         "tipo": "estado",
         "fatos": store.fatos("confirmado"),
@@ -178,13 +179,14 @@ def retrato(store, config, voz, modelo="", ouvidos=None):
         "lembretes": store.agenda_pendente(),
         "turnos": store.turnos(20),
         "entregas": Entregas(store).listar(20),
-        "entradas": Entregas(store).entradas(),
+        "entradas": entradas,
         "modelo": modelo,
         "modelo_configurado": config.modelo,
         "modelo_estado": "pronta" if modelo else "indisponivel",
         "voz": voz.disponivel() if voz else False,
         "ouvidos": ouvidos.disponivel() if ouvidos else False,
         "motivo_ouvidos": ouvidos.diagnostico() if ouvidos else "desligada",
+        "capacidades": capacidades or {},
     }
 
 
@@ -729,6 +731,28 @@ def _executar(zeus, store, config):
     ouvidos = montar_ouvidos(config, estado_local)
     recebidas_da_hud = CaixaDeEntrada(maxsize=32)
     hud, endereco = None, None
+
+    def capacidades_atuais():
+        """Cada capacidade com estado e motivo próprios. Disponibilidade do
+        modelo, captura do microfone e saúde da máquina são coisas diferentes."""
+        pesquisa = zeus.ferramentas.pesquisa
+        mapa = zeus.ferramentas.mapa
+        return {
+            "modelo": {"estado": "pronta" if modelo_ok else "indisponivel",
+                       "nome": config.modelo,
+                       "motivo": "" if modelo_ok else str(servido)[:200]},
+            "voz": {"estado": "pronta" if voz.disponivel() else "ausente",
+                    "motivo": voz.diagnostico()},
+            "escuta": {"estado": "pronta" if ouvidos.disponivel() else "ausente",
+                       "motivo": ouvidos.diagnostico()},
+            "pesquisa": {"estado": "configurada" if pesquisa and pesquisa.disponivel() else "ausente",
+                         "motivo": pesquisa.diagnostico() if pesquisa else "não configurada"},
+            "telegram": {"estado": "configurado" if zeus.canal is not None else "ausente",
+                         "motivo": "" if zeus.canal is not None else "sem token e chat_id"},
+            "mapa": {"estado": "ativo" if mapa and mapa.ativo else "ausente",
+                     "motivo": mapa.diagnostico() if mapa else "não configurado"},
+        }
+
     # Sem chave configurada, um código de pareamento de uso único, válido por
     # quinze minutos. Ele aparece no log uma vez; depois de usado, o log antigo
     # não abre mais nada. A chave configurada nunca é impressa.
@@ -747,10 +771,11 @@ def _executar(zeus, store, config):
             enfileirar=recebidas_da_hud.put_nowait, voz=voz, chave=chave,
             codigo_unico=codigo, arquivo_de_sessoes=estado_local / "hud" / "sessoes.json",
             host=config.hud_host, porta=config.hud_porta,
-            estado=retrato(store, config, voz, servido if modelo_ok else "", ouvidos),
+            estado=retrato(store, config, voz, servido if modelo_ok else "", ouvidos,
+                           capacidades_atuais()),
             pasta_de_escuta=ouvidos.destino,
             mapa=montar_mapa(config, estado_local),
-            certificado=certificado, chave_tls=chave_tls)
+            certificado=certificado, chave_tls=chave_tls, telemetria=telemetria)
         porta = hud.iniciar()
         esquema = "https" if hud.seguro else "http"
         endereco = f"{esquema}://{endereco_local()}:{porta}/"
@@ -765,12 +790,56 @@ def _executar(zeus, store, config):
          voz=voz.diagnostico(), ouvidos=ouvidos.diagnostico(),
          hud=endereco or "desligada")
 
-    def anunciar(de, texto, audio=None):
+    def anunciar(de, texto, audio=None, turno=None, detalhes=None, canal=None):
         if hud is None:
             return
-        hud.publicar("mensagem", de=de, texto=texto, audio=audio,
-                     hora=datetime.now().strftime("%H:%M"))
-        hud.atualizar(retrato(store, config, voz, servido if modelo_ok else "", ouvidos))
+        hud.publicar("mensagem", de=de, texto=texto, audio=audio, turno=turno,
+                     detalhes=detalhes, canal=canal, hora=datetime.now().strftime("%H:%M"))
+        atualizar_retrato()
+
+    def atualizar_retrato():
+        if hud is not None:
+            hud.atualizar(retrato(store, config, voz, servido if modelo_ok else "", ouvidos,
+                                  capacidades_atuais()))
+
+    def detalhes_do_turno(medida):
+        """O que a interface mostra em "Como chegou a isso?": só o que houve.
+
+        Ferramentas usadas, rodadas, tempo medido e fontes do turno. Nenhuma
+        explicação inventada do raciocínio do modelo."""
+        linha = medida.como_linha()
+        fontes = []
+        if hasattr(zeus.ferramentas, "fontes_para_mostrar"):
+            fontes = zeus.ferramentas.fontes_para_mostrar()
+        return {"ferramentas": [{"nome": f["nome"], "resultado": f["resultado"]}
+                                for f in linha["ferramentas"]],
+                "rodadas": len(linha["rodadas"]), "total_ms": linha["total_ms"],
+                "resultado": linha["resultado"], "fontes": fontes,
+                "modelo": servido if modelo_ok else None}
+
+    def executar_pendencia(pedido):
+        """Só as ações que o backend suporta, no dono do banco."""
+        tipo, alvo, acao = pedido.get("alvo_tipo"), pedido.get("alvo"), pedido.get("acao")
+        try:
+            if tipo == "pergunta" and acao == "cancelar":
+                ok = store.cancelar_pergunta(int(alvo))
+                return ok, ("Pergunta cancelada." if ok else "A pergunta já não estava aberta.")
+            if tipo == "lembrete" and acao == "cancelar":
+                ok = store.cancelar_agenda(int(alvo))
+                return ok, ("Lembrete cancelado. Um envio já iniciado pode chegar."
+                            if ok else "O lembrete já não estava pendente.")
+            if tipo == "entrega":
+                fila_de_saida.resolver(str(alvo), acao)
+                return True, {"confirmar": "Marcada como entregue.",
+                              "reenviar": "Volta para a fila e pode duplicar se já tiver chegado.",
+                              "descartar": "Descartada."}[acao]
+            if tipo == "entrada":
+                fila_de_saida.resolver_entrada(int(alvo), acao)
+                return True, ("Volta para a fila. Efeitos já feitos podem se repetir."
+                              if acao == "reprocessar" else "Mensagem descartada.")
+        except ValueError as erro:
+            return False, str(erro)
+        return False, "Ação não suportada."
 
     def contar_lugares():
         """Quando o Zeus localiza algo, o mapa da interface vai junto."""
@@ -795,11 +864,13 @@ def _executar(zeus, store, config):
             finally:
                 contar_lugares()
 
+        turno = medida.turno if medida is not None else None
+
         def empurrar(pedaco):
             if pedaco is None:
-                hud.publicar("fluxo", reiniciar=True)
+                hud.publicar("fluxo", reiniciar=True, turno=turno)
             else:
-                hud.publicar("fluxo", pedaco=pedaco)
+                hud.publicar("fluxo", pedaco=pedaco, turno=turno)
 
         try:
             return zeus.conversar(texto, canal=canal, ao_receber=empurrar, medida=medida,
@@ -892,6 +963,7 @@ def _executar(zeus, store, config):
                     servido = ligar_modelo(zeus, config)
                     modelo_ok = True
                     operacao.atualizar('modelo', estado='pronta')
+                    atualizar_retrato()     # o sinal da interface volta junto
                 except ErroDeModelo:
                     operacao.atualizar('modelo', estado='indisponivel')
                 proxima_recuperacao = time.monotonic() + max(5, config.intervalo_recuperacao_modelo)
@@ -906,6 +978,14 @@ def _executar(zeus, store, config):
                 zeus.capacidades = {"voz": voz.disponivel(), "ouvidos": ouvidos.disponivel(),
                                     "pesquisa": zeus.ferramentas.pesquisa.disponivel()
                                     if zeus.ferramentas.pesquisa else False}
+                if pedido.get("tipo") == "pendencia":
+                    ok, mensagem = executar_pendencia(pedido)
+                    if hud is not None:
+                        hud.publicar("pendencia_resultado", pedido=pedido.get("id"), ok=ok,
+                                     mensagem=mensagem, alvo_tipo=pedido.get("alvo_tipo"),
+                                     alvo=pedido.get("alvo"), acao=pedido.get("acao"))
+                    atualizar_retrato()
+                    continue
                 if pedido.get("tipo") == "telegram":
                     recebidas = pedido["mensagens"]
                     chave_resposta = fila_de_saida.iniciar_resposta(recebidas)
@@ -919,12 +999,13 @@ def _executar(zeus, store, config):
                                              turno=chave_resposta)
                         texto = "\n".join(m["texto"] for m in recebidas)
                         responde_a = fila_de_saida.pergunta_respondida(recebidas)
-                        anunciar("nicolas", texto)
+                        anunciar("nicolas", texto, canal="telegram", turno=medida.turno)
                         resposta = com_aviso_de_digitacao(
                             zeus.canal, lambda: responder(texto, "telegram", medida=medida,
                                                           responde_a=responde_a))
                         fila_de_saida.concluir_resposta(chave_resposta, resposta)
-                        anunciar("zeus", resposta)
+                        anunciar("zeus", resposta, turno=medida.turno, canal="telegram",
+                                 detalhes=detalhes_do_turno(medida))
                     except Exception:
                         if chave_resposta:
                             situacao = fila_de_saida.resposta_interrompida(
@@ -958,6 +1039,7 @@ def _executar(zeus, store, config):
                             continue
                         if hud is not None:
                             hud.publicar("mensagem", de="nicolas", texto=texto,
+                                         turno=medida.turno, canal="hud",
                                          hora=datetime.now().strftime("%H:%M"))
                     if not texto:
                         medida.concluir("falhou", "mensagem_vazia")
@@ -966,7 +1048,8 @@ def _executar(zeus, store, config):
                         hud.publicar("situacao", estado="pensando", detalhe="gerando resposta")
                     resposta = responder(texto, "hud", em_fluxo=True, medida=medida,
                                          responde_a=pedido.get("responde_a"))
-                    anunciar("zeus", resposta)
+                    anunciar("zeus", resposta, turno=medida.turno, canal="hud",
+                             detalhes=detalhes_do_turno(medida))
                     if fala and voz.disponivel():
                         fala.falar(resposta, geracao, medida.turno)
                 finally:
@@ -975,8 +1058,10 @@ def _executar(zeus, store, config):
         except Exception as erro:  # o ciclo não morre por falha de rede
             if isinstance(erro, ErroDeModelo):
                 modelo_ok = False
+                servido = f"indisponível: {erro}"
                 proxima_recuperacao = time.monotonic() + max(5, config.intervalo_recuperacao_modelo)
                 operacao.atualizar('modelo', estado='degradada')
+                atualizar_retrato()         # o sinal apaga na hora, não na próxima mensagem
             emit("falha_no_ciclo", detalhe=str(erro)[:200])
             if hud is not None:
                 hud.publicar("fluxo", reiniciar=True)

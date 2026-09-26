@@ -12,6 +12,15 @@ import urllib.request
 from zeus.hud import ServidorHUD
 from zeus.voz import Voz
 
+def pagina_inteira():
+    """A página e os arquivos estáticos que ela carrega: as promessas valem
+    para tudo o que o navegador executa, não só para o HTML."""
+    from zeus.hud.servidor import ESTATICO, PAGINA, arquivos_estaticos
+    partes = [PAGINA.read_text(encoding="utf-8")]
+    partes += [(ESTATICO / nome).read_text(encoding="utf-8") for nome in arquivos_estaticos()]
+    return "\n".join(partes)
+
+
 RETRATO = {"tipo": "estado", "fatos": [], "perguntas": [], "lembretes": [],
            "turnos": [], "modelo": "modelo-falso", "voz": False}
 
@@ -94,18 +103,18 @@ class Servidor(unittest.TestCase):
 
         É uma promessa que só vale se ninguém, um dia, acrescentar um envio
         por engano. Este teste lê a página atrás disso."""
-        from zeus.hud.servidor import PAGINA
-        pagina = PAGINA.read_text(encoding="utf-8")
+        pagina = pagina_inteira()
         for proibido in ("toBlob", "toDataURL", "canvas.toDataURL",
                          "MediaRecorder(TRILHA_DE_VIDEO", "/visao", "/camera"):
             self.assertNotIn(proibido, pagina, proibido)
         # O único envio de mídia que existe é o do áudio da escuta, que é
         # explícito, com botão próprio, e vai para a transcrição local.
         self.assertEqual(pagina.count('"/escuta"'), 1)
+        # Nenhum elemento de texto externo vira marcação.
+        self.assertNotIn("innerHTML", pagina)
 
     def test_a_camera_comeca_desligada_e_avisa_enquanto_estiver_ligada(self):
-        from zeus.hud.servidor import PAGINA
-        pagina = PAGINA.read_text(encoding="utf-8")
+        pagina = pagina_inteira()
         self.assertIn("let CAMERA = null", pagina)
         self.assertIn("luzDaCamera", pagina)
         # Aba escondida com a câmera ligada é o que ninguém quer ver.
@@ -113,19 +122,75 @@ class Servidor(unittest.TestCase):
 
     def test_aceno_nao_finge_que_o_microfone_esta_ouvindo(self):
         """Defeito C5: o aceno punha o orbe em "ouvindo" sem captura nenhuma."""
-        from zeus.hud.servidor import PAGINA
-        pagina = PAGINA.read_text(encoding="utf-8")
+        pagina = pagina_inteira()
         inicio = pagina.index("function aplicarGesto(")
-        corpo = pagina[inicio:pagina.index("\n}\n", inicio)]
+        corpo = pagina[inicio:pagina.index("\n  }\n", inicio)]
         self.assertNotIn('mudarEstado("ouvindo"', corpo)
+        self.assertNotIn('"capturando"', corpo)
+        self.assertNotIn("alternar", corpo)
 
     def test_mensagem_entra_na_fila_do_laco_principal(self):
-        self.assertEqual(self.pedir("/mensagem", {"texto": "bom dia"})[0], 202)
-        self.assertEqual(self.recebidas, [{"tipo": "texto", "texto": "bom dia"}])
+        codigo, corpo = self.pedir("/mensagem", {"texto": "bom dia", "id": "msg-0000001"})
+        self.assertEqual(codigo, 202)
+        # 202 é "na fila", não "feito": o estado seguinte vem do núcleo.
+        self.assertEqual(json.loads(corpo), {"id": "msg-0000001", "estado": "em_fila"})
+        self.assertEqual([(r["tipo"], r["texto"], r["id"]) for r in self.recebidas],
+                         [("texto", "bom dia", "msg-0000001")])
         self.assertEqual(self.pedir("/mensagem", {"texto": "   "})[0], 400)
         self.assertEqual(self.pedir("/mensagem", corpo_bruto=b"nao e json")[0], 400)
         self.assertEqual(self.pedir("/mensagem", {"texto": "x" * 5000})[0], 413)
-        self.assertEqual(self.recebidas, [{"tipo": "texto", "texto": "bom dia"}])
+        self.assertEqual(self.pedir("/mensagem", {"texto": "oi", "id": "curto"})[0], 400)
+        self.assertEqual(len(self.recebidas), 1)
+
+    def test_reenvio_com_o_mesmo_id_nao_duplica(self):
+        """Reconexão não duplica envio: o id é a identidade da mensagem."""
+        primeiro = self.pedir("/mensagem", {"texto": "oi", "id": "msg-repetida"})
+        segundo = self.pedir("/mensagem", {"texto": "oi", "id": "msg-repetida"})
+        self.assertEqual(primeiro[0], 202)
+        self.assertEqual(segundo[0], 200)
+        self.assertTrue(json.loads(segundo[1])["duplicada"])
+        self.assertEqual(len(self.recebidas), 1)
+
+    def test_estado_do_turno_segue_o_nucleo(self):
+        self.pedir("/mensagem", {"texto": "oi", "id": "msg-estado01"})
+        self.hud.publicar("turno", turno="msg-estado01", canal="hud", etapa="consultando_modelo",
+                          detalhe={"rodada": 1}, decorrido_ms=40.0)
+        estado = json.loads(self.pedir("/estado")[1])
+        registro = {t["id"]: t for t in estado["turnos_hud"]}["msg-estado01"]
+        self.assertEqual(registro["estado"], "processando")
+        self.assertEqual(registro["etapa"], "consultando_modelo")
+        self.assertIn("sessao_servidor", estado)
+        self.assertGreater(estado["seq"], 0)
+
+    def test_pendencia_so_aceita_acao_suportada(self):
+        ok = self.pedir("/pendencia", {"tipo": "lembrete", "alvo": 3, "acao": "cancelar"})
+        self.assertEqual(ok[0], 202)
+        self.assertEqual(self.recebidas[-1]["tipo"], "pendencia")
+        for invalido in ({"tipo": "lembrete", "alvo": 3, "acao": "reenviar"},
+                         {"tipo": "entrega", "alvo": 3, "acao": "confirmar"},
+                         {"tipo": "fato", "alvo": 1, "acao": "esquecer"},
+                         {"tipo": "entrada", "alvo": True, "acao": "descartar"}):
+            self.assertEqual(self.pedir("/pendencia", invalido)[0], 400, invalido)
+
+    def test_estaticos_so_da_pasta_e_so_nomes_simples(self):
+        from zeus.hud.servidor import arquivos_estaticos
+        nomes = arquivos_estaticos()
+        self.assertIn("app.js", nomes)
+        codigo, corpo = self.pedir("/estatico/app.js", chave=None)
+        self.assertEqual(codigo, 200)
+        for proibido in ("/estatico/../servidor.py", "/estatico/servidor.py",
+                         "/estatico/app.js.map", "/estatico/.env"):
+            self.assertEqual(self.pedir(proibido, chave=None)[0], 404, proibido)
+
+    def test_reconexao_recebe_o_que_faltou_ou_manda_recarregar(self):
+        self.hud.publicar("mensagem", de="zeus", texto="um")
+        marca = self.hud.estado()["seq"]
+        self.hud.publicar("mensagem", de="zeus", texto="dois")
+        faltou = self.hud.desde(marca)
+        self.assertEqual([json.loads(p)["texto"] for _, p in faltou], ["dois"])
+        for _ in range(2000):
+            self.hud.publicar("fluxo", pedaco=".")
+        self.assertIsNone(self.hud.desde(marca))   # saiu do histórico: recarregar
 
     def test_corpo_sem_objeto_ou_texto_nao_string_e_recusado(self):
         for corpo in (b'[]', b'null', b'{"texto":42}'):
@@ -271,10 +336,9 @@ class Sessao(unittest.TestCase):
             outro.parar()
 
     def test_a_chave_nao_vai_para_o_log_nem_para_o_navegador(self):
-        from zeus.hud.servidor import PAGINA
         principal = (Path(__file__).resolve().parents[1] / "src/zeus/__main__.py").read_text()
         self.assertNotIn("?chave={chave}", principal)
-        pagina = PAGINA.read_text(encoding="utf-8")
+        pagina = pagina_inteira()
         self.assertNotIn('sessionStorage.setItem("zeus_chave"', pagina)
         self.assertNotIn("chave=\" + encodeURIComponent(CHAVE)", pagina)
 

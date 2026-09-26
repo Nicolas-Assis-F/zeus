@@ -19,8 +19,9 @@ import http.cookies
 import json
 import os
 import queue
+import re
 import time
-from collections import deque
+from collections import OrderedDict, deque
 import shutil
 import socket
 import ssl
@@ -29,12 +30,57 @@ import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from ..mapa import MapaIndisponivel
 from ..saude import Saude
 
 PAGINA = Path(__file__).resolve().parent / "index.html"
+# Arquivos estáticos da interface: só o que está nesta pasta, só .js e .css,
+# só nomes simples. Nenhum caminho vindo da URL chega ao disco sem passar aqui.
+ESTATICO = Path(__file__).resolve().parent / "estatico"
+NOME_ESTATICO = re.compile(r"^[a-z0-9][a-z0-9-]*\.(js|css)$")
+TIPO_ESTATICO = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8"}
+ID_VALIDO = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+HISTORICO_DE_EVENTOS = 1500
+TURNOS_LEMBRADOS = 80
+
+# Etapa publicada pelo núcleo -> estado da mensagem na interface. HTTP 202 é
+# "aceita"; processada é outra coisa, e só o núcleo diz quando.
+ESTADO_DA_ETAPA = {
+    "em_fila": "em_fila", "transcrevendo": "processando",
+    "montando_contexto": "processando", "consultando_modelo": "processando",
+    "escrevendo": "processando", "executando_ferramenta": "processando",
+    "sintetizando_voz": "processando", "concluida": "concluida",
+    "falhou": "falhou", "interrompida": "interrompida",
+}
+ACOES_DE_PENDENCIA = {
+    "pergunta": {"cancelar"}, "lembrete": {"cancelar"},
+    "entrega": {"confirmar", "reenviar", "descartar"},
+    "entrada": {"reprocessar", "descartar"},
+}
+
+
+def arquivos_estaticos():
+    """Nomes servíveis, para a rota e para quem testa a página."""
+    if not ESTATICO.is_dir():
+        return []
+    return sorted(a.name for a in ESTATICO.iterdir() if NOME_ESTATICO.match(a.name))
+
+
+class _Assinante:
+    """Uma conexão SSE. Fila cheia não bloqueia ninguém: marca que perdeu, e a
+    próxima escrita manda ressincronizar em vez de fingir que nada faltou."""
+
+    def __init__(self):
+        self.fila = queue.Queue(maxsize=256)
+        self.perdeu = False
+
+    def entregar(self, seq, pacote):
+        try:
+            self.fila.put_nowait((seq, pacote))
+        except queue.Full:
+            self.perdeu = True
 LIMITE_DE_MENSAGEM = 4000
 LIMITE_DE_AUDIO = 12 * 1024 * 1024
 
@@ -97,7 +143,7 @@ class ServidorHUD:
                  host: str = "0.0.0.0", porta: int = 8770, estado=None,
                  pasta_de_escuta=None, certificado=None, chave_tls=None,
                  saude=None, mapa=None, codigo_unico: str = "",
-                 arquivo_de_sessoes=None, relogio=None):
+                 arquivo_de_sessoes=None, relogio=None, telemetria=None):
         if not chave and not codigo_unico:
             raise ValueError("A HUD exige uma chave de acesso ou um código de pareamento.")
         self._relogio = relogio or time.time
@@ -107,6 +153,13 @@ class ServidorHUD:
         self._sessoes = self._carregar_sessoes()
         self._falhas = {}
         self._falhas_no_total = deque()
+        # Sequência de eventos desta subida do servidor. A página guarda o
+        # último que viu; na reconexão recebe o que faltou, ou é avisada de
+        # que precisa recarregar o estado — nunca completa texto adivinhando.
+        self.sessao_servidor = uuid.uuid4().hex[:12]
+        self._seq = 0
+        self._historico = deque(maxlen=HISTORICO_DE_EVENTOS)
+        self._turnos = OrderedDict()
         self.enfileirar = enfileirar    # callable(dict)
         self._retrato = dict(estado or {"tipo": "estado"})
         self.pasta_de_escuta = Path(pasta_de_escuta) if pasta_de_escuta else None
@@ -121,6 +174,7 @@ class ServidorHUD:
         # busca uma vez e guarda. Assim o mapa funciona sem rede depois da
         # primeira olhada, e só um agente aparece no servidor público.
         self.mapa = mapa
+        self.telemetria = telemetria
         self.voz = voz
         self.chave = chave
         self.host = host
@@ -132,7 +186,10 @@ class ServidorHUD:
 
     def estado(self) -> dict:
         with self.trava:
-            return dict(self._retrato)
+            retrato = dict(self._retrato)
+            retrato.update(sessao_servidor=self.sessao_servidor, seq=self._seq,
+                           turnos_hud=list(self._turnos.values())[-40:])
+            return retrato
 
     def atualizar(self, retrato: dict, difundir: bool = True):
         """Recebe o retrato pronto de quem é dono do banco.
@@ -147,25 +204,78 @@ class ServidorHUD:
 
     # ------------------------------------------------------------- difusão
     def publicar(self, tipo: str = "estado", **campos):
-        pacote = json.dumps({"tipo": tipo, **campos}, ensure_ascii=False)
         with self.trava:
+            self._seq += 1
+            seq = self._seq
+            if tipo == "turno":
+                self._atualizar_turno(campos, seq)
+            pacote = json.dumps({"tipo": tipo, **campos, "seq": seq,
+                                 "sessao": self.sessao_servidor}, ensure_ascii=False)
+            self._historico.append((seq, pacote))
             alvos = list(self.assinantes)
-        for fila in alvos:
-            try:
-                fila.put_nowait(pacote)
-            except queue.Full:
-                pass
+        for assinante in alvos:
+            assinante.entregar(seq, pacote)
+
+    def _atualizar_turno(self, campos, seq):
+        identificador = campos.get("turno")
+        if not identificador:
+            return
+        registro = self._turnos.pop(identificador, None) or {
+            "id": identificador, "canal": campos.get("canal"), "origem": campos.get("origem")}
+        etapa = campos.get("etapa")
+        registro.update(etapa=etapa, estado=ESTADO_DA_ETAPA.get(etapa, registro.get("estado")),
+                        detalhe=campos.get("detalhe") or {}, decorrido_ms=campos.get("decorrido_ms"),
+                        seq=seq)
+        self._turnos[identificador] = registro
+        while len(self._turnos) > TURNOS_LEMBRADOS:
+            self._turnos.popitem(last=False)
+
+    def turno(self, identificador):
+        with self.trava:
+            registro = self._turnos.get(identificador)
+            return dict(registro) if registro else None
+
+    def desde(self, seq):
+        """Eventos depois de `seq`, ou None quando o buraco já saiu do histórico."""
+        with self.trava:
+            if not self._historico:
+                return [] if seq >= self._seq else None
+            if seq < self._historico[0][0] - 1:
+                return None
+            return [(s, p) for s, p in self._historico if s > seq]
 
     def _assinar(self):
-        fila = queue.Queue(maxsize=64)
+        assinante = _Assinante()
         with self.trava:
-            self.assinantes.append(fila)
-        return fila
+            self.assinantes.append(assinante)
+        return assinante
 
-    def _cancelar(self, fila):
+    def _cancelar(self, assinante):
         with self.trava:
-            if fila in self.assinantes:
-                self.assinantes.remove(fila)
+            if assinante in self.assinantes:
+                self.assinantes.remove(assinante)
+
+    def aceitar(self, pedido: dict) -> dict:
+        """Registra a mensagem com a identidade do cliente e põe na fila.
+
+        O mesmo id duas vezes é a mesma mensagem: reenviar depois de uma
+        queda de rede não duplica. Devolve (código HTTP, corpo)."""
+        identificador = pedido["id"]
+        with self.trava:
+            existente = self._turnos.get(identificador)
+        if existente is not None:
+            return 200, {"id": identificador, "estado": existente.get("estado"),
+                         "duplicada": True}
+        self.publicar("turno", turno=identificador, canal="hud", origem=pedido.get("origem"),
+                      etapa="em_fila", detalhe={}, decorrido_ms=None)
+        try:
+            self.enfileirar(pedido)
+        except queue.Full:
+            self.publicar("turno", turno=identificador, canal="hud", etapa="falhou",
+                          detalhe={"motivo": "fila cheia"}, decorrido_ms=None)
+            return 503, {"id": identificador, "estado": "falhou",
+                         "erro": "fila cheia; tente novamente em instantes"}
+        return 202, {"id": identificador, "estado": "em_fila"}
 
     def autorizado(self, chave: str) -> bool:
         """Chave por cabeçalho, para cliente de linha de comando e testes."""
@@ -332,15 +442,6 @@ def _construir(hud: ServidorHUD):
                 return None
             return tamanho
 
-        def _enfileirar(self, pedido):
-            try:
-                hud.enfileirar(pedido)
-            except queue.Full:
-                if pedido.get("arquivo"):
-                    Path(pedido["arquivo"]).unlink(missing_ok=True)
-                return self._json(503, {"erro": "fila cheia; tente novamente em instantes"})
-            return self._json(202, {"recebido": True})
-
         # ----------------------------------------------------------- rotas
         def do_GET(self):
             caminho = urlparse(self.path).path
@@ -352,6 +453,8 @@ def _construir(hud: ServidorHUD):
             if caminho == "/favicon.ico":
                 # O navegador pede sozinho; negar com 401 só suja o console.
                 return self._responder(204, b"", "image/x-icon")
+            if caminho.startswith("/estatico/"):
+                return self._estatico(caminho[len("/estatico/"):])
             if caminho == "/sessao":
                 return self._json(200, {"autenticado": self._liberado(),
                                         "pareamento": bool(hud._codigo)})
@@ -371,6 +474,14 @@ def _construir(hud: ServidorHUD):
                 return self._tela(caminho[len("/mapa/tela/"):])
             if caminho == "/fluxo":
                 return self._fluxo()
+            if caminho == "/diagnostico":
+                if hud.telemetria is None:
+                    return self._json(503, {"erro": "telemetria desligada"})
+                return self._json(200, {"tipo": "diagnostico",
+                                        "turnos": hud.telemetria.recentes("turno", 15),
+                                        "voz": hud.telemetria.recentes("voz", 10),
+                                        "falhas_de_gravacao": hud.telemetria.falhas,
+                                        "gravando": hud.telemetria.gravar})
             if caminho.startswith("/audio/"):
                 return self._audio(caminho.rsplit("/", 1)[-1])
             return self._json(404, {"erro": "rota desconhecida"})
@@ -389,9 +500,11 @@ def _construir(hud: ServidorHUD):
                                   extras={"Set-Cookie": self._biscoito("", 0)})
             if caminho == "/escuta":
                 return self._escuta()
+            if caminho == "/pendencia":
+                return self._pendencia()
             if caminho != "/mensagem":
                 return self._json(404, {"erro": "rota desconhecida"})
-            tamanho = self._tamanho(LIMITE_DE_MENSAGEM)
+            tamanho = self._tamanho(LIMITE_DE_MENSAGEM + 512)
             if tamanho is None:
                 return
             try:
@@ -399,11 +512,59 @@ def _construir(hud: ServidorHUD):
                 if not isinstance(dados, dict) or not isinstance(dados.get("texto", ""), str):
                     raise ValueError
                 texto = dados.get("texto", "").strip()
+                identificador = self._identificador(dados.get("id"))
+                responde_a = dados.get("responde_a")
+                if responde_a is not None and (isinstance(responde_a, bool)
+                                               or not isinstance(responde_a, int)):
+                    raise ValueError
             except (ValueError, UnicodeDecodeError):
                 return self._json(400, {"erro": "corpo inválido"})
             if not texto:
                 return self._json(400, {"erro": "mensagem vazia"})
-            return self._enfileirar({"tipo": "texto", "texto": texto[:LIMITE_DE_MENSAGEM]})
+            if len(texto) > LIMITE_DE_MENSAGEM:
+                return self._json(413, {"erro": "conteúdo longo demais"})
+            pedido = {"tipo": "texto", "texto": texto, "id": identificador, "origem": "texto"}
+            if responde_a is not None:
+                pedido["responde_a"] = responde_a
+            return self._json(*hud.aceitar(pedido))
+
+        def _identificador(self, bruto):
+            if bruto is None:
+                return uuid.uuid4().hex
+            if not isinstance(bruto, str) or not ID_VALIDO.match(bruto):
+                raise ValueError
+            return bruto
+
+        def _pendencia(self):
+            tamanho = self._tamanho(1024)
+            if tamanho is None:
+                return
+            try:
+                dados = json.loads(self.rfile.read(tamanho) or b"{}")
+                tipo, acao, alvo = dados.get("tipo"), dados.get("acao"), dados.get("alvo")
+                if acao not in ACOES_DE_PENDENCIA.get(tipo, set()):
+                    raise ValueError
+                if tipo == "entrega":
+                    if not isinstance(alvo, str) or not 0 < len(alvo) <= 200:
+                        raise ValueError
+                elif isinstance(alvo, bool) or not isinstance(alvo, int):
+                    raise ValueError
+                identificador = self._identificador(dados.get("id"))
+            except (ValueError, UnicodeDecodeError, AttributeError):
+                return self._json(400, {"erro": "ação de pendência inválida"})
+            try:
+                hud.enfileirar({"tipo": "pendencia", "id": identificador, "alvo_tipo": tipo,
+                                "alvo": alvo, "acao": acao})
+            except queue.Full:
+                return self._json(503, {"erro": "fila cheia; tente novamente em instantes"})
+            return self._json(202, {"id": identificador, "estado": "em_fila"})
+
+        def _estatico(self, nome):
+            if not NOME_ESTATICO.match(nome) or nome not in arquivos_estaticos():
+                return self._json(404, {"erro": "arquivo desconhecido"})
+            corpo = (ESTATICO / nome).read_bytes()
+            return self._responder(200, corpo, TIPO_ESTATICO[nome.rsplit(".", 1)[1]],
+                                   extras={"X-Content-Type-Options": "nosniff"})
 
         def _entrar(self):
             tamanho = self._tamanho(512)
@@ -438,35 +599,68 @@ def _construir(hud: ServidorHUD):
             if len(corpo) != tamanho:
                 self.close_connection = True
                 return self._json(400, {"erro": "áudio incompleto"})
+            try:
+                identificador = self._identificador(self.headers.get("X-Zeus-Turno"))
+            except ValueError:
+                return self._json(400, {"erro": "identificador de turno inválido"})
             arquivo.write_bytes(corpo)
             arquivo.chmod(0o600)
             # A transcrição acontece no laço principal: o modelo de escuta é
             # um só e não deve ser usado por duas threads ao mesmo tempo.
-            return self._enfileirar({"tipo": "audio", "arquivo": str(arquivo)})
+            codigo, resposta = hud.aceitar({"tipo": "audio", "arquivo": str(arquivo),
+                                            "id": identificador, "origem": "voz"})
+            if codigo != 202:
+                arquivo.unlink(missing_ok=True)
+            return self._json(codigo, resposta)
 
         def _fluxo(self):
-            fila = hud._assinar()
+            """SSE com id em cada evento. Na reconexão o navegador manda o
+            último id; se ele ainda está no histórico, o que faltou é
+            reenviado; se não, a página é mandada recarregar o estado."""
+            assinante = hud._assinar()
+            ultimo = self.headers.get("Last-Event-ID", "")
+            atraso = None
+            if ultimo:
+                sessao, _, seq = ultimo.partition(":")
+                if sessao == hud.sessao_servidor and seq.isdigit():
+                    atraso = hud.desde(int(seq))
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "keep-alive")
             self.end_headers()
+
+            def escrever(seq, pacote):
+                self.wfile.write(f"id: {hud.sessao_servidor}:{seq}\n".encode()
+                                 + b"data: " + pacote.encode("utf-8") + b"\n\n")
+
+            def ressincronizar():
+                self.wfile.write(b"data: " + json.dumps(
+                    {"tipo": "ressincronizar", "sessao": hud.sessao_servidor}).encode() + b"\n\n")
+
             try:
-                self.wfile.write(b": conectado\n\n")
+                self.wfile.write(b"retry: 3000\n: conectado\n\n")
+                if ultimo and atraso is None:
+                    ressincronizar()
+                for seq, pacote in atraso or []:
+                    escrever(seq, pacote)
                 self.wfile.flush()
                 while True:
                     try:
-                        pacote = fila.get(timeout=15)
+                        seq, pacote = assinante.fila.get(timeout=15)
                     except queue.Empty:
                         self.wfile.write(b": pulso\n\n")  # mantém a conexão viva
                         self.wfile.flush()
                         continue
-                    self.wfile.write(b"data: " + pacote.encode("utf-8") + b"\n\n")
+                    if assinante.perdeu:
+                        assinante.perdeu = False
+                        ressincronizar()
+                    escrever(seq, pacote)
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
-                hud._cancelar(fila)
+                hud._cancelar(assinante)
 
         def _tela(self, resto):
             """/mapa/tela/z/x/y.png — do disco quando a tela já foi vista."""

@@ -21,12 +21,17 @@ e verifica, como a voz e a escuta já fazem.
 
 ## O que dá para fazer
 
-**Acenar** chama a atenção: o campo de conversa recebe foco e o orbe vai para
-"ouvindo". Aceno é a mão trocando de direção três vezes em menos de um
+**Acenar** chama a atenção: o campo de conversa recebe foco. O orbe **não** vai
+para "ouvindo" — nenhum microfone foi ligado, e dizer que está ouvindo seria
+mentira. Aceno é a mão trocando de direção três vezes em menos de um
 segundo — passar na frente da câmera não conta, de propósito.
 
-**Mão fechada sobre o mapa** arrasta o mapa, como a mão faria num mapa de
-papel. Mão aberta só passeia.
+O arrasto do mapa com a "mão fechada" saiu na HUD v1. "Fechada" aqui era a
+mancha encolher em relação ao pico, e afastar a mão da câmera produz o mesmo
+sinal: o mapa se mexia sem ninguém pedir. Voltará quando houver
+reconhecimento de dedos de verdade, com calibração.
+
+O botão dos gestos fica no Diagnóstico, marcado como experimental.
 
 Nenhum gesto manda mensagem, executa ferramenta ou abre coisa. Uma sombra na
 parede não pode disparar ação no computador de ninguém, e um gesto é sempre

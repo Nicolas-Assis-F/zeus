@@ -188,7 +188,8 @@ class Medida:
             self.resultado = resultado
             if erro is not None:
                 self.erro = erro if isinstance(erro, str) else type(erro).__name__
-            self.etapa(resultado if resultado in ETAPAS else "concluida")
+            detalhe = {"erro": self.erro} if self.erro else {}
+            self.etapa(resultado if resultado in ETAPAS else "concluida", **detalhe)
 
     def agora_ms(self):
         return _ms(self.recebido_em or self.inicio, self._relogio())
