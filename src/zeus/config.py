@@ -92,6 +92,11 @@ class Config:
     intervalo_monitor: int = 30
     intervalo_recuperacao_modelo: int = 30
     espera_telegram: int = 25
+    # Medida de cada turno: fila, contexto, rodadas do modelo, ferramentas e
+    # voz. Em memória sempre (alimenta o Diagnóstico da interface); em disco
+    # só quando ligado, em estado/medidas/, sem texto de conversa nenhum.
+    telemetria_arquivo: bool = False
+    telemetria_dias: int = 14
     # Preenchido por carregar(): dizer de onde a configuração veio evita a
     # confusão de editar um arquivo que o programa nunca lê.
     origem: str = "nenhum arquivo lido"

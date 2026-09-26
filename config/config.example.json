@@ -47,5 +47,7 @@
   "atraso_maximo_lembrete": 86400,
   "monitorar_modelo": false,
   "intervalo_monitor": 30,
-  "intervalo_recuperacao_modelo": 30
+  "intervalo_recuperacao_modelo": 30,
+  "telemetria_arquivo": false,
+  "telemetria_dias": 14
 }

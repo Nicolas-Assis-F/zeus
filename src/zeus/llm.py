@@ -13,6 +13,8 @@ import json
 import urllib.error
 import urllib.request
 
+from .telemetria import estatisticas_do_ollama, estatisticas_openai
+
 TEMPO_LIMITE = 120
 
 
@@ -94,13 +96,18 @@ def transporte_sse(metodo: str, url: str, corpo=None, cabecalhos=None, timeout=T
 
 
 class Resposta:
-    def __init__(self, texto: str, chamadas=None, modelo: str = "", estatisticas=None):
+    def __init__(self, texto: str, chamadas=None, modelo: str = "", estatisticas=None,
+                 medidas=None):
         self.texto = texto or ""
         self.chamadas = chamadas or []
         self.modelo = modelo
         # Números do próprio servidor: melhores que cronômetro nosso para
         # comparar modelos, porque separam leitura do prompt de geração.
         self.estatisticas = estatisticas or {}
+        # Uma entrada por chamada ao provedor que produziu esta resposta. O
+        # híbrido tem duas: a decisão local e a conversa remota. Sem isso a
+        # decisão local, que custa uma geração inteira, sumiria da medida.
+        self.medidas = list(medidas or [])
 
     def __repr__(self):
         return f"Resposta(modelo={self.modelo!r}, chamadas={len(self.chamadas)})"
@@ -204,7 +211,8 @@ class ProvedorOllama:
             )
         mensagem = dados.get("message", {}) or {}
         chamadas = _normalizar_chamadas(mensagem.get("tool_calls"))
-        return Resposta(mensagem.get("content", ""), chamadas, servido)
+        medida = {"provedor": self.nome, "fluxo": False, **estatisticas_do_ollama(dados)}
+        return Resposta(mensagem.get("content", ""), chamadas, servido, medidas=[medida])
 
     def conversar_em_fluxo(self, mensagens, ferramentas=None, temperatura=0.0,
                            ao_receber=None) -> Resposta:
@@ -225,7 +233,7 @@ class ProvedorOllama:
         fluxo = self.transporte_de_fluxo("POST", f"{self.url}/api/chat", corpo, None,
                                          self.timeout)
         partes, chamadas, servido, estatisticas = [], [], "", {}
-        concluido = False
+        concluido, final = False, {}
         for pacote in fluxo:
             servido = _modelo_do_pacote(self.modelo, pacote, servido)
             mensagem = pacote.get("message", {}) or {}
@@ -241,9 +249,11 @@ class ProvedorOllama:
                                 ("eval_count", "eval_duration", "prompt_eval_count",
                                  "prompt_eval_duration", "load_duration")
                                 if pacote.get(chave) is not None}
+                final = pacote
         if not concluido:
             raise ErroDeModelo("O fluxo terminou antes da confirmação de conclusão.")
-        return Resposta("".join(partes), chamadas, servido, estatisticas)
+        medida = {"provedor": self.nome, "fluxo": True, **estatisticas_do_ollama(final)}
+        return Resposta("".join(partes), chamadas, servido, estatisticas, medidas=[medida])
 
     def mensagem_do_assistente(self, resposta: Resposta) -> dict:
         mensagem = {"role": "assistant", "content": resposta.texto}
@@ -306,7 +316,8 @@ class ProvedorOpenRouter:
                 "nome": funcao.get("name", ""),
                 "argumentos": argumentos if isinstance(argumentos, dict) else {},
             })
-        return Resposta(mensagem.get("content", ""), chamadas, servido)
+        medida = {"provedor": self.nome, "fluxo": False, **estatisticas_openai(dados)}
+        return Resposta(mensagem.get("content", ""), chamadas, servido, medidas=[medida])
 
     def conversar_em_fluxo(self, mensagens, ferramentas=None, temperatura=0.0,
                            ao_receber=None) -> Resposta:
@@ -315,10 +326,12 @@ class ProvedorOpenRouter:
         if ferramentas:
             corpo["tools"] = ferramentas
         partes, servido, chamadas = [], "", {}
-        concluido = False
+        concluido, uso = False, {}
         for pacote in self.transporte_de_fluxo("POST", f"{self.url}/chat/completions",
                                                corpo, self._cabecalhos(), self.timeout):
             servido = _modelo_do_pacote(self.modelo, pacote, servido)
+            if pacote.get("usage"):
+                uso = pacote
             for escolha in pacote.get("choices") or []:
                 if escolha.get("index", 0) != 0:
                     continue
@@ -343,8 +356,9 @@ class ProvedorOpenRouter:
                     concluido = True
         if not concluido:
             raise ErroDeModelo("O fluxo terminou antes da confirmação de conclusão.")
+        medida = {"provedor": self.nome, "fluxo": True, **estatisticas_openai(uso)}
         return Resposta("".join(partes), _normalizar_chamadas(
-            [chamadas[i] for i in sorted(chamadas)]), servido)
+            [chamadas[i] for i in sorted(chamadas)]), servido, medidas=[medida])
 
     def mensagem_do_assistente(self, resposta: Resposta) -> dict:
         mensagem = {"role": "assistant", "content": resposta.texto}
@@ -397,21 +411,31 @@ class ProvedorHibrido:
             convertidas.append(nova)
         return convertidas
 
+    @staticmethod
+    def _somar(anterior, resposta):
+        # A decisão local descartada também custou: a medida fica com ela.
+        if anterior is not None:
+            resposta.medidas = anterior.medidas + resposta.medidas
+        return resposta
+
     def conversar(self, mensagens, ferramentas=None, temperatura=0.0) -> Resposta:
+        decisao = None
         if ferramentas:
             decisao = self.local.conversar(mensagens, ferramentas, 0.0)
             if decisao.chamadas:
                 return decisao
-        return self.remoto.conversar(self._mensagens_remotas(mensagens), None, temperatura)
+        return self._somar(decisao, self.remoto.conversar(
+            self._mensagens_remotas(mensagens), None, temperatura))
 
     def conversar_em_fluxo(self, mensagens, ferramentas=None, temperatura=0.0,
                            ao_receber=None) -> Resposta:
+        decisao = None
         if ferramentas:
             decisao = self.local.conversar(mensagens, ferramentas, 0.0)
             if decisao.chamadas:
                 return decisao
-        return self.remoto.conversar_em_fluxo(
-            self._mensagens_remotas(mensagens), None, temperatura, ao_receber)
+        return self._somar(decisao, self.remoto.conversar_em_fluxo(
+            self._mensagens_remotas(mensagens), None, temperatura, ao_receber))
 
     def mensagem_do_assistente(self, resposta: Resposta) -> dict:
         alvo = self.local if resposta.chamadas else self.remoto

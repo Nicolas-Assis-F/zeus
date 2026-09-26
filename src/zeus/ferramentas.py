@@ -167,6 +167,15 @@ NOMES = {item["function"]["name"] for item in CATALOGO}
 # garante isso é o núcleo; a lista mora aqui, junto do catálogo que descreve.
 NOMES_DE_LEITURA = {"pesquisar", "ler_pagina"}
 
+# O que cada ferramenta pode causar fora da conversa. Serve à medida do turno
+# e ao registro de efeitos: "nenhum" só lê; "estado_local" muda memória ou
+# agenda do próprio Zeus; "externo" mexe em algo fora dele.
+EFEITOS = {
+    "lembrar_fato": "estado_local", "esquecer_fato": "estado_local",
+    "agendar_pergunta": "estado_local", "agendar_lembrete": "estado_local",
+    "encerrar_pendencia": "estado_local", "abrir_no_computador": "externo",
+}
+
 
 class Ferramentas:
     NOMES_DE_LEITURA = NOMES_DE_LEITURA
@@ -183,6 +192,10 @@ class Ferramentas:
 
     def catalogo(self):
         return CATALOGO
+
+    @staticmethod
+    def efeito(nome: str) -> str:
+        return EFEITOS.get(nome, "nenhum") if nome in NOMES else "desconhecida"
 
     def catalogo_de_leitura(self):
         """Só as ferramentas que trazem dado de fora, para depois que dado

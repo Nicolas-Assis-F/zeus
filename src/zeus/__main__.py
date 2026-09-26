@@ -33,6 +33,7 @@ from .persona import Persona
 from .pesquisa import Pesquisa
 from .ouvidos import Ouvidos
 from .store import Store
+from .telemetria import Medida, Telemetria, ler_medidas, resumir
 from .voz import Voz
 
 SEM_MODELO = (
@@ -272,6 +273,19 @@ def main():
     conversa = commands.add_parser("conversar", help="Uma troca pelo terminal")
     conversa.add_argument("texto")
 
+    medidas_cmd = commands.add_parser(
+        "medidas", help="Resumir as medidas de turno gravadas, com p50/p95 e amostra")
+    medidas_cmd.add_argument("--pasta", type=Path, default=None,
+                             help="Pasta com os .jsonl; padrão: medidas do estado")
+    bancada_cmd = commands.add_parser(
+        "bancada", help="Repetir um roteiro sintético contra o modelo real, em estado isolado")
+    bancada_cmd.add_argument("--roteiro", type=Path, default=None)
+    bancada_cmd.add_argument("--repeticoes", type=int, default=3)
+    bancada_cmd.add_argument("--sem-fluxo", action="store_true",
+                             help="Medir a rota sem fluxo, como a do Telegram")
+    bancada_cmd.add_argument("--com-pesquisa", action="store_true",
+                             help="Permitir a busca na internet durante o roteiro")
+
     evento = commands.add_parser("evento", help="Registrar um acontecimento observado")
     evento.add_argument("tipo")
     evento.add_argument("resumo")
@@ -280,6 +294,19 @@ def main():
 
     args = parser.parse_args()
     os.umask(0o077)
+    # Estes dois não abrem o banco do estado: a bancada exige pasta vazia e o
+    # resumo só lê arquivos de medida.
+    if args.command == "medidas":
+        pasta = args.pasta or (args.state_dir.expanduser() / "medidas")
+        linhas = ler_medidas(pasta) if Path(pasta).is_dir() else []
+        emit("medidas", pasta=str(pasta), **resumir(linhas))
+        return 0 if linhas else 1
+    if args.command == "bancada":
+        try:
+            return bancada(args, default_state)
+        except (ErroDeModelo, ValueError) as erro:
+            print(str(erro), file=sys.stderr)
+            return 2
     config, store, zeus = montar(args)
 
     try:
@@ -426,6 +453,87 @@ def main():
         return 2
     finally:
         store.close()
+
+
+def versao_do_codigo():
+    """Commit em execução, quando o clone tem Git. Sem Git, None: não inventar."""
+    import subprocess
+    raiz = Path(__file__).resolve().parents[2]
+    try:
+        saida = subprocess.run(["git", "-C", str(raiz), "rev-parse", "--short", "HEAD"],
+                               capture_output=True, text=True, timeout=2, check=True)
+        return saida.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def linha_de_sessao(config, origem):
+    """Ambiente da medida: sem ele, dois números não são comparáveis."""
+    return {"tipo": "sessao", "v": 1, "origem": origem, "versao": __version__,
+            "commit": versao_do_codigo(), "provedor": config.provedor,
+            "modelo": config.modelo, "modelo_conversa": config.modelo_conversa or None,
+            "contexto_tokens": config.contexto_tokens,
+            "limite_de_resposta": config.limite_de_resposta,
+            "teto_de_contexto": config.teto_de_contexto,
+            "turnos_de_conversa": config.turnos_de_conversa,
+            "registrado_em": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+
+
+ROTEIRO_DA_BANCADA = Path(__file__).resolve().parents[2] / "avaliacao" / "bancada.json"
+
+
+def bancada(args, estado_padrao):
+    """Linha de base comparável: o mesmo roteiro, a rota real, estado isolado.
+
+    Nada aqui toca o estado de produção nem canal nenhum. A pasta precisa ser
+    nova ou vazia, para que memória antiga não entre no prompt e mude o
+    número. O roteiro é sintético: nenhum dado pessoal é necessário."""
+    config = carregar_config(getattr(args, "config", None))
+    destino = args.state_dir.expanduser()
+    if destino.resolve() == Path(estado_padrao).expanduser().resolve():
+        raise ValueError("A bancada exige --state-dir próprio, fora do estado do Zeus.")
+    if destino.exists() and any(destino.iterdir()):
+        raise ValueError(f"{destino} não está vazio. Use uma pasta nova para a bancada.")
+    roteiro = json.loads((args.roteiro or ROTEIRO_DA_BANCADA).read_text(encoding="utf-8"))
+    turnos = [t for t in roteiro.get("turnos", []) if isinstance(t, str) and t.strip()]
+    if not turnos:
+        raise ValueError("Roteiro sem turnos.")
+    destino.mkdir(parents=True, exist_ok=True, mode=0o700)
+    telemetria = Telemetria(destino, gravar=True, dias=365)
+    telemetria.registrar({**linha_de_sessao(config, "bancada"),
+                          "roteiro": roteiro.get("id", "sem-id"), "turnos": len(turnos),
+                          "repeticoes": args.repeticoes, "fluxo": not args.sem_fluxo,
+                          "pesquisa": bool(args.com_pesquisa)})
+    persona = Persona.carregar(config.persona)
+    for repeticao in range(1, max(1, args.repeticoes) + 1):
+        pasta = destino / f"rodada-{repeticao}"
+        store = Store(pasta)
+        try:
+            pesquisa = montar_pesquisa(config, pasta) if args.com_pesquisa else None
+            ferramentas = Ferramentas(store, pesquisa=pesquisa)
+            zeus = Zeus(store, None, persona, ferramentas, config, canal=None)
+            zeus.capacidades = {"voz": False, "ouvidos": False,
+                                "pesquisa": bool(pesquisa and pesquisa.disponivel())}
+            ligar_modelo(zeus, config)
+            for passo, texto in enumerate(turnos, start=1):
+                medida = Medida(canal="bancada", origem="texto", recebido_em=time.monotonic())
+                try:
+                    zeus.conversar(texto, canal="bancada", medida=medida,
+                                   ao_receber=None if args.sem_fluxo else (lambda _p: None))
+                except ErroDeModelo as erro:
+                    emit("bancada_falha", repeticao=repeticao, passo=passo,
+                         erro=type(erro).__name__)
+                linha = medida.como_linha()
+                linha["bancada"] = {"repeticao": repeticao, "passo": passo}
+                telemetria.registrar(linha)
+                emit("bancada_turno", repeticao=repeticao, passo=passo,
+                     resultado=linha["resultado"], total_ms=linha["total_ms"],
+                     rodadas=len(linha["rodadas"]))
+        finally:
+            store.close()
+    resumo = resumir(ler_medidas(destino / "medidas"))
+    emit("bancada", pasta=str(destino), **resumo)
+    return 0
 
 
 def avaliar(config, args):
@@ -586,6 +694,10 @@ def _executar(zeus, store, config):
         signal.signal(signum, lambda *_: stopped.set())
 
     operacao = EstadoOperacao()
+    telemetria = Telemetria(Path(store.path).parent, gravar=config.telemetria_arquivo,
+                            dias=config.telemetria_dias)
+    telemetria.registrar(linha_de_sessao(config, "run"))
+    zeus.telemetria = telemetria
     fila_de_saida = Entregas(store)
     modelo_ok = False
     try:
@@ -644,14 +756,17 @@ def _executar(zeus, store, config):
         if achados is not None:
             zeus.ferramentas.ultimos_lugares = []
 
-    def responder(texto, canal, em_fluxo=False):
+    def responder(texto, canal, em_fluxo=False, medida=None):
         """Uma pergunta, uma resposta, a mesma identidade em qualquer canal."""
         if not modelo_ok:
             store.registrar_turno(canal, "nicolas", texto)
+            if medida is not None:
+                medida.ausentes["rodadas"] = "modelo indisponível; nenhuma chamada feita"
+                medida.concluir("falhou", "modelo_indisponivel")
             return SEM_MODELO
         if not (em_fluxo and hud is not None):
             try:
-                return zeus.conversar(texto, canal=canal)
+                return zeus.conversar(texto, canal=canal, medida=medida)
             finally:
                 contar_lugares()
 
@@ -662,11 +777,29 @@ def _executar(zeus, store, config):
                 hud.publicar("fluxo", pedaco=pedaco)
 
         try:
-            return zeus.conversar(texto, canal=canal, ao_receber=empurrar)
+            return zeus.conversar(texto, canal=canal, ao_receber=empurrar, medida=medida)
         finally:
             contar_lugares()
 
-    fala = FalaEmSegundoPlano(voz, hud.publicar) if hud is not None else None
+    def nova_medida(pedido, canal, origem, geracao):
+        """Um turno identificado, com a etapa real publicada para a interface."""
+        medida = Medida(canal=canal, origem=origem, geracao=geracao,
+                        turno=pedido.get("id") or None,
+                        recebido_em=pedido.get("recebido_em"))
+        if hud is not None:
+            def publicar_etapa(etapa, detalhe, decorrido_ms):
+                hud.publicar("turno", turno=medida.turno, canal=canal, etapa=etapa,
+                             detalhe=detalhe, decorrido_ms=decorrido_ms, geracao=geracao)
+            medida.ao_mudar = publicar_etapa
+        return medida
+
+    def registrar_medida(medida):
+        if medida.fim is None:
+            medida.concluir("interrompida")
+        telemetria.registrar(medida.como_linha())
+
+    fala = (FalaEmSegundoPlano(voz, hud.publicar, ao_medir=telemetria.registrar)
+            if hud is not None else None)
     supervisor = SupervisorPresenca(estado_local, config, stopped, hud, operacao)
     supervisor.iniciar()
     if not supervisor.pronto.wait(5) or operacao.retrato().get('agenda', {}).get('estado') == 'indisponivel':
@@ -750,13 +883,15 @@ def _executar(zeus, store, config):
                 if pedido.get("tipo") == "telegram":
                     recebidas = pedido["mensagens"]
                     chave_resposta = fila_de_saida.iniciar_resposta(recebidas)
+                    medida = None
                     try:
                         if chave_resposta is None:
                             continue
+                        medida = nova_medida(pedido, "telegram", "texto", geracao)
                         texto = "\n".join(m["texto"] for m in recebidas)
                         anunciar("nicolas", texto)
                         resposta = com_aviso_de_digitacao(
-                            zeus.canal, lambda: responder(texto, "telegram"))
+                            zeus.canal, lambda: responder(texto, "telegram", medida=medida))
                         fila_de_saida.concluir_resposta(chave_resposta, resposta)
                         anunciar("zeus", resposta)
                     except Exception:
@@ -765,30 +900,43 @@ def _executar(zeus, store, config):
                         raise
                     finally:
                         pedido["terminado"].set()
+                        if medida is not None:
+                            registrar_medida(medida)
                     continue
                 texto = pedido.get("texto", "")
-                if pedido.get("tipo") == "audio":
-                    if hud is not None:
-                        hud.publicar("situacao", estado="ouvindo",
-                                     detalhe="transcrevendo aqui mesmo")
-                    texto = ouvidos.transcrever(pedido.get("arquivo", ""))
-                    if not texto:
+                origem = "voz" if pedido.get("tipo") == "audio" else "texto"
+                medida = nova_medida(pedido, "hud", origem, geracao)
+                try:
+                    if pedido.get("tipo") == "audio":
                         if hud is not None:
-                            hud.publicar("mensagem", de="sistema",
-                                         texto="Não entendi o áudio. " + ouvidos.diagnostico())
-                            hud.publicar("situacao", estado="ocioso", detalhe="—")
+                            hud.publicar("situacao", estado="ouvindo",
+                                         detalhe="transcrevendo aqui mesmo")
+                        medida.etapa("transcrevendo")
+                        texto = ouvidos.transcrever(pedido.get("arquivo", ""))
+                        # Só números: a transcrição em si nunca entra na medida.
+                        medida.escuta = {k: ouvidos.ultima_medicao.get(k) for k in
+                                         ("carga_s", "transcricao_s", "audio_s", "com_fala")}
+                        if not texto:
+                            medida.concluir("falhou", "sem_transcricao")
+                            if hud is not None:
+                                hud.publicar("mensagem", de="sistema",
+                                             texto="Não entendi o áudio. " + ouvidos.diagnostico())
+                                hud.publicar("situacao", estado="ocioso", detalhe="—")
+                            continue
+                        if hud is not None:
+                            hud.publicar("mensagem", de="nicolas", texto=texto,
+                                         hora=datetime.now().strftime("%H:%M"))
+                    if not texto:
+                        medida.concluir("falhou", "mensagem_vazia")
                         continue
                     if hud is not None:
-                        hud.publicar("mensagem", de="nicolas", texto=texto,
-                                     hora=datetime.now().strftime("%H:%M"))
-                if not texto:
-                    continue
-                if hud is not None:
-                    hud.publicar("situacao", estado="pensando", detalhe="gerando resposta")
-                resposta = responder(texto, "hud", em_fluxo=True)
-                anunciar("zeus", resposta)
-                if fala and voz.disponivel():
-                    fala.falar(resposta, geracao)
+                        hud.publicar("situacao", estado="pensando", detalhe="gerando resposta")
+                    resposta = responder(texto, "hud", em_fluxo=True, medida=medida)
+                    anunciar("zeus", resposta)
+                    if fala and voz.disponivel():
+                        fala.falar(resposta, geracao, medida.turno)
+                finally:
+                    registrar_medida(medida)
 
         except Exception as erro:  # o ciclo não morre por falha de rede
             if isinstance(erro, ErroDeModelo):
