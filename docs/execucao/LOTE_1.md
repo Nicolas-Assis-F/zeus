@@ -39,6 +39,21 @@ localmente, pendente no X99, validado, integrado. “Passou com dublê”,
 | --- | --- | --- |
 | Z00 | verificado localmente | este registro |
 | Z01 | verificado localmente; linha de base pendente no X99 | `tests/test_telemetria.py`, `tests/test_bancada.py`, `docs/MEDIDAS.md` |
+| Z02 | verificado localmente com dublês; comportamento do modelo real pendente no X99 | `tests/test_estados.py`, `tests/test_entregas.py`, `tests/test_hud.py` |
+
+### Z02 — defeitos reproduzidos na base
+
+Os testes novos rodados contra `b3a8afb` falham (reprodução) e passam depois
+da correção:
+
+| Defeito | Sintoma na base | Correção |
+| --- | --- | --- |
+| C1 última rodada | 3ª rodada executava a ferramenta e respondia “não soube responder” | última rodada sem catálogo; pedido tardio não executa e a resposta diz isso; efeito feito aparece no texto |
+| efeito sem registro | efeito só existia na tabela de destino | intenção e resultado em `efeitos_do_turno`, antes e depois da ferramenta |
+| C3 pergunta | qualquer mensagem com uma pergunta aberta virava resposta | só `responde_a` explícito (HUD, “responder” no Telegram) ou `responder_pergunta` com número |
+| C4 chip | nome configurado acendia o modelo indisponível | retrato separa `modelo` verificado, `modelo_configurado` e `modelo_estado` |
+| C5 gesto | aceno mostrava “ouvindo” sem captura | aceno só foca o campo e diz que o microfone continua desligado |
+| C6 entrada | falha do modelo deixava a mensagem do Telegram parada até a CLI | sem efeito: volta para a fila (até 2 vezes); com efeito: incerta |
 
 ## Anúncio sugerido para as issues
 

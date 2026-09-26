@@ -104,6 +104,14 @@ class Servidor(unittest.TestCase):
         # Aba escondida com a câmera ligada é o que ninguém quer ver.
         self.assertIn("document.hidden && CAMERA", pagina)
 
+    def test_aceno_nao_finge_que_o_microfone_esta_ouvindo(self):
+        """Defeito C5: o aceno punha o orbe em "ouvindo" sem captura nenhuma."""
+        from zeus.hud.servidor import PAGINA
+        pagina = PAGINA.read_text(encoding="utf-8")
+        inicio = pagina.index("function aplicarGesto(")
+        corpo = pagina[inicio:pagina.index("\n}\n", inicio)]
+        self.assertNotIn('mudarEstado("ouvindo"', corpo)
+
     def test_mensagem_entra_na_fila_do_laco_principal(self):
         self.assertEqual(self.pedir("/mensagem", {"texto": "bom dia"})[0], 202)
         self.assertEqual(self.recebidas, [{"tipo": "texto", "texto": "bom dia"}])

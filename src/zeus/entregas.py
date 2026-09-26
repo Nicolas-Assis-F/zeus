@@ -6,6 +6,13 @@ from datetime import datetime, timedelta
 from .store import agora_utc, texto_de
 
 
+# Marca de que o turno foi iniciado por uma versão que registra a intenção de
+# cada efeito antes de executar. Sem ela, uma entrada interrompida é tratada
+# como incerta: versões antigas não deixavam esse rastro.
+MARCA_DE_EFEITOS = "efeitos_rastreados:"
+TENTATIVAS_SEM_EFEITO = 2
+
+
 class NaoEnviado(RuntimeError):
     """O canal sabe que a mensagem não foi aceita; repetir é seguro."""
 
@@ -38,11 +45,33 @@ class Entregas:
         ).rowcount == 1
 
     def recuperar(self, agora=None):
-        """Executar uma vez, sob trava de instância, após reinício do serviço."""
+        """Executar uma vez, sob trava de instância, após reinício do serviço.
+
+        Entrada interrompida só volta sozinha para a fila quando dá para
+        provar que nada com efeito chegou a começar: o turno foi iniciado por
+        uma versão que registra intenção de efeito (marca em kv) e nenhuma
+        intenção foi registrada. Qualquer outro caso fica incerto, para
+        revisão — repetir pode duplicar um lembrete ou uma ação."""
         with self.db:
             self.db.execute("UPDATE saidas SET situacao='incerta', motivo='processo interrompido durante envio', "
                             "atualizada_em=? WHERE situacao='em_envio'", (texto_de(agora or agora_utc()),))
-            self.db.execute("UPDATE entradas SET situacao='incerta' WHERE situacao='processando'")
+            chaves = {r[0] for r in self.db.execute(
+                "SELECT resposta FROM entradas WHERE situacao='processando'")}
+            for chave in chaves:
+                seguro = chave is not None and self._sem_efeito(chave)
+                self.db.execute(
+                    "UPDATE entradas SET situacao=?, resposta=CASE WHEN ? THEN NULL ELSE resposta END "
+                    "WHERE situacao='processando' AND resposta IS ?",
+                    ('pendente' if seguro else 'incerta', seguro, chave))
+
+    def _sem_efeito(self, chave) -> bool:
+        rastreado = self.db.execute("SELECT 1 FROM kv WHERE chave=?",
+                                    (MARCA_DE_EFEITOS + chave,)).fetchone()
+        if not rastreado:
+            return False
+        return self.db.execute(
+            "SELECT 1 FROM episodios WHERE tipo='efeitos_do_turno' AND resumo=?",
+            ("turno:" + chave,)).fetchone() is None
 
     def registrar_agenda(self, canal, agora, atraso_maximo=86400):
         itens = [('pergunta', p) for p in self.store.perguntas_vencidas(agora)]
@@ -160,6 +189,8 @@ class Entregas:
                 return None
             for i in ids:
                 self.db.execute("UPDATE entradas SET situacao='processando', resposta=? WHERE id=?", (chave, i))
+            self.db.execute("INSERT OR IGNORE INTO kv (chave, valor) VALUES (?, '1')",
+                            (MARCA_DE_EFEITOS + chave,))
         return chave
 
     def concluir_resposta(self, chave, texto, agora=None):
@@ -170,6 +201,43 @@ class Entregas:
     def resposta_incerta(self, chave):
         with self.db:
             self.db.execute("UPDATE entradas SET situacao='incerta' WHERE resposta=? AND situacao='processando'", (chave,))
+
+    def resposta_interrompida(self, chave, houve_efeito: bool) -> str:
+        """Falha no meio da resposta: reprocessar só quando é seguro.
+
+        Sem nenhum efeito iniciado, a mensagem volta para a fila (no máximo
+        duas vezes) e a próxima tentativa responde de novo — ou diz que o
+        modelo está fora. Com efeito, fica incerta para revisão explícita."""
+        tentativas = int(self.store.kv_get("tentativas:" + chave, "0") or 0) + 1
+        self.store.kv_set("tentativas:" + chave, tentativas)
+        if houve_efeito or not self._sem_efeito(chave) or tentativas > TENTATIVAS_SEM_EFEITO:
+            self.resposta_incerta(chave)
+            return "incerta"
+        with self.db:
+            self.db.execute("UPDATE entradas SET situacao='pendente', resposta=NULL "
+                            "WHERE resposta=? AND situacao='processando'", (chave,))
+        return "pendente"
+
+    def pergunta_respondida(self, mensagens):
+        """Pergunta que Nicolas respondeu usando "responder" no Telegram.
+
+        O canal guarda a qual mensagem do Zeus a entrada responde; aqui essa
+        mensagem é ligada à saída da pergunta pelo recibo. Sem resposta
+        explícita, ou com respostas a perguntas diferentes, não há vínculo."""
+        achadas = set()
+        for mensagem in mensagens:
+            alvo = self.store.kv_get(f"telegram_responde_a:{mensagem.get('id')}")
+            if not alvo:
+                continue
+            for linha in self.db.execute("SELECT referencia, recibo FROM saidas "
+                                         "WHERE tipo='pergunta' AND recibo IS NOT NULL"):
+                try:
+                    recibo = json.loads(linha["recibo"])
+                except (TypeError, ValueError):
+                    continue
+                if str(recibo.get("message_id")) == str(alvo):
+                    achadas.add(linha["referencia"])
+        return achadas.pop() if len(achadas) == 1 else None
 
     def entradas(self):
         return [dict(r) for r in self.db.execute("SELECT id, situacao, recebida_em, resposta FROM entradas WHERE situacao!='respondida' ORDER BY id LIMIT 50")]

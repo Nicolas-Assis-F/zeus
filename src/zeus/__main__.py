@@ -166,7 +166,11 @@ def montar_ouvidos(config, estado):
 
 
 def retrato(store, config, voz, modelo="", ouvidos=None):
-    """O que a HUD mostra: memória confirmada, pendências e conversa recente."""
+    """O que a HUD mostra: memória confirmada, pendências e conversa recente.
+
+    `modelo` é o que respondeu à verificação; vazio quer dizer indisponível.
+    O nome configurado vai à parte: mostrá-lo no lugar do verificado fazia a
+    interface acender o modelo justamente quando ele estava fora."""
     return {
         "tipo": "estado",
         "fatos": store.fatos("confirmado"),
@@ -175,7 +179,9 @@ def retrato(store, config, voz, modelo="", ouvidos=None):
         "turnos": store.turnos(20),
         "entregas": Entregas(store).listar(20),
         "entradas": Entregas(store).entradas(),
-        "modelo": modelo or config.modelo,
+        "modelo": modelo,
+        "modelo_configurado": config.modelo,
+        "modelo_estado": "pronta" if modelo else "indisponivel",
         "voz": voz.disponivel() if voz else False,
         "ouvidos": ouvidos.disponivel() if ouvidos else False,
         "motivo_ouvidos": ouvidos.diagnostico() if ouvidos else "desligada",
@@ -756,7 +762,7 @@ def _executar(zeus, store, config):
         if achados is not None:
             zeus.ferramentas.ultimos_lugares = []
 
-    def responder(texto, canal, em_fluxo=False, medida=None):
+    def responder(texto, canal, em_fluxo=False, medida=None, responde_a=None):
         """Uma pergunta, uma resposta, a mesma identidade em qualquer canal."""
         if not modelo_ok:
             store.registrar_turno(canal, "nicolas", texto)
@@ -766,7 +772,8 @@ def _executar(zeus, store, config):
             return SEM_MODELO
         if not (em_fluxo and hud is not None):
             try:
-                return zeus.conversar(texto, canal=canal, medida=medida)
+                return zeus.conversar(texto, canal=canal, medida=medida,
+                                      responde_a=responde_a)
             finally:
                 contar_lugares()
 
@@ -777,14 +784,15 @@ def _executar(zeus, store, config):
                 hud.publicar("fluxo", pedaco=pedaco)
 
         try:
-            return zeus.conversar(texto, canal=canal, ao_receber=empurrar, medida=medida)
+            return zeus.conversar(texto, canal=canal, ao_receber=empurrar, medida=medida,
+                                  responde_a=responde_a)
         finally:
             contar_lugares()
 
-    def nova_medida(pedido, canal, origem, geracao):
+    def nova_medida(pedido, canal, origem, geracao, turno=None):
         """Um turno identificado, com a etapa real publicada para a interface."""
         medida = Medida(canal=canal, origem=origem, geracao=geracao,
-                        turno=pedido.get("id") or None,
+                        turno=turno or pedido.get("id") or None,
                         recebido_em=pedido.get("recebido_em"))
         if hud is not None:
             def publicar_etapa(etapa, detalhe, decorrido_ms):
@@ -887,16 +895,23 @@ def _executar(zeus, store, config):
                     try:
                         if chave_resposta is None:
                             continue
-                        medida = nova_medida(pedido, "telegram", "texto", geracao)
+                        # O turno do Telegram tem a identidade da entrada: é
+                        # por ela que a recuperação acha o registro de efeitos.
+                        medida = nova_medida(pedido, "telegram", "texto", geracao,
+                                             turno=chave_resposta)
                         texto = "\n".join(m["texto"] for m in recebidas)
+                        responde_a = fila_de_saida.pergunta_respondida(recebidas)
                         anunciar("nicolas", texto)
                         resposta = com_aviso_de_digitacao(
-                            zeus.canal, lambda: responder(texto, "telegram", medida=medida))
+                            zeus.canal, lambda: responder(texto, "telegram", medida=medida,
+                                                          responde_a=responde_a))
                         fila_de_saida.concluir_resposta(chave_resposta, resposta)
                         anunciar("zeus", resposta)
                     except Exception:
                         if chave_resposta:
-                            fila_de_saida.resposta_incerta(chave_resposta)
+                            situacao = fila_de_saida.resposta_interrompida(
+                                chave_resposta, bool(zeus.efeitos_do_ultimo_turno()))
+                            emit("entrada_interrompida", situacao=situacao)
                         raise
                     finally:
                         pedido["terminado"].set()
@@ -931,7 +946,8 @@ def _executar(zeus, store, config):
                         continue
                     if hud is not None:
                         hud.publicar("situacao", estado="pensando", detalhe="gerando resposta")
-                    resposta = responder(texto, "hud", em_fluxo=True, medida=medida)
+                    resposta = responder(texto, "hud", em_fluxo=True, medida=medida,
+                                         responde_a=pedido.get("responde_a"))
                     anunciar("zeus", resposta)
                     if fala and voz.disponivel():
                         fala.falar(resposta, geracao, medida.turno)

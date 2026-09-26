@@ -69,7 +69,11 @@ class ProvaDePresenca(unittest.TestCase):
 
             # Reinício do processo: o estado está no disco, o aviso não volta.
             store.close()
+            # A resposta só vincula com o número da pergunta: aqui o modelo
+            # cita #1 pela ferramenta. Proximidade no tempo não basta.
             store, provedor, zeus = montar(temp, relogio, canal, [
+                Resposta("", [chamada("responder_pergunta", pergunta=1,
+                                      resposta="pode lembrar sim")], "modelo-falso"),
                 Resposta("", [chamada("agendar_lembrete",
                                       texto="creatina antes do treino",
                                       quando="+2h")], "modelo-falso"),
