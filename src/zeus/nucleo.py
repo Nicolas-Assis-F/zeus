@@ -172,6 +172,8 @@ class Zeus:
         medida.etapa("montando_contexto")
         medida.marcar("contexto_inicio")
         respondida = self._vincular_resposta(texto, agora, responde_a)
+        if hasattr(self.ferramentas, "iniciar_turno"):
+            self.ferramentas.iniciar_turno(texto)
         mensagens = self._historico(texto)
         medida.marcar("contexto_pronto")
         medida.contexto = {

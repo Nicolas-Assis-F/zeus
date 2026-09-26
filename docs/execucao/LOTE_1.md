@@ -40,6 +40,7 @@ localmente, pendente no X99, validado, integrado. “Passou com dublê”,
 | Z00 | verificado localmente | este registro |
 | Z01 | verificado localmente; linha de base pendente no X99 | `tests/test_telemetria.py`, `tests/test_bancada.py`, `docs/MEDIDAS.md` |
 | Z02 | verificado localmente com dublês; comportamento do modelo real pendente no X99 | `tests/test_estados.py`, `tests/test_entregas.py`, `tests/test_hud.py` |
+| Z03 | verificado localmente com dublês e loopback; TLS real da HUD e DNS real pendentes no X99 | `tests/test_fronteiras.py`, `tests/test_hud.py` (classe `Sessao`) |
 
 ### Z02 — defeitos reproduzidos na base
 
@@ -54,6 +55,17 @@ da correção:
 | C4 chip | nome configurado acendia o modelo indisponível | retrato separa `modelo` verificado, `modelo_configurado` e `modelo_estado` |
 | C5 gesto | aceno mostrava “ouvindo” sem captura | aceno só foca o campo e diz que o microfone continua desligado |
 | C6 entrada | falha do modelo deixava a mensagem do Telegram parada até a CLI | sem efeito: volta para a fila (até 2 vezes); com efeito: incerta |
+
+### Z03 — achados reconferidos na versão-base
+
+| Achado | Reprodução | Correção (commit próprio) |
+| --- | --- | --- |
+| S2 leitor abre qualquer URL e busca continua após dado externo | dublê: página com injeção fez o núcleo abrir `coletor.example/?d=<fato>`; 4 de 5 testes novos falham na base | `ler_pagina` só por identificador de fonte do turno (F*, U*); `pesquisar` sai depois de dado externo |
+| S3 filtro de rede interna por texto | `[::1]`, `100.100.1.1`, `2130706433`, `zeus.local`, `localtest.me`, `fd00::1` aceitos pelo filtro antigo | DNS conferido (todos os endereços públicos), conexão presa ao IP com nome no Host/TLS, cada salto conferido |
+| S4 chave na URL, no log, sem limite | `?chave=` em 8 chamadas da página e no evento `started`; nenhuma contagem de erro | sessão por cookie HttpOnly/Strict, código de pareamento de uso único, limite de tentativas, `Origin` nas mutações |
+
+Rotação de credenciais: descrita por nome no relatório ao usuário, nunca por
+valor. Esta execução não revogou nem trocou credencial nenhuma.
 
 ## Anúncio sugerido para as issues
 

@@ -6,21 +6,34 @@ sem dependência: uma página, um fluxo de eventos e duas rotas.
 
 ## Abrir
 
-Defina `chave_hud` em `~/.config/zeus/config.json`. Se você deixar vazio, o
-Zeus gera uma chave a cada início e a imprime no evento `started` — prático
-para testar, ruim para o dia a dia, porque o endereço muda.
+Defina `chave_hud` em `~/.config/zeus/config.json` com 24 caracteres
+aleatórios ou mais (`python3 -c "import secrets;print(secrets.token_urlsafe(24))"`).
+`./zeus check` avisa quando ela é curta, sem mostrar o valor.
 
 ```bash
 ./zeus run
-# {"event": "started", ..., "hud": "http://0.0.0.0:8770/?chave=..."}
+# {"event": "started", ..., "hud": "https://IP:8770/"}
 ```
 
-Do seu computador, abra `http://192.168.100.221:8770/?chave=SUA_CHAVE`. A
-página pede a chave se você entrar sem ela na URL.
+Abra o endereço e digite a chave. Ela vai uma vez, por POST, e volta como
+sessão num cookie `HttpOnly` e `SameSite=Strict`, válida por 30 dias e
+guardada no servidor só como hash (`~/.local/state/zeus/hud/sessoes.json`).
+“Sair” revoga a sessão daquele aparelho; apagar o arquivo revoga todas.
+
+Sem `chave_hud`, o Zeus imprime no início um **código de pareamento de uso
+único**, válido por quinze minutos (evento `hud_pareamento`). Depois de usado,
+o log antigo não abre mais nada.
+
+A chave nunca viaja na URL de dado: URL fica em histórico, favorito e log. Um
+endereço antigo com `?chave=` ainda entra uma vez — a página troca pela sessão
+e tira a chave da barra —, mas o pedido inicial pode ter ficado no histórico do
+navegador; prefira digitar. Cinco tentativas erradas por minuto num endereço (ou
+trinta no total) bloqueiam novas tentativas por um minuto. Mutação vinda de
+outra origem é recusada.
 
 A chave não é decoração. Sem ela, qualquer aparelho na mesma rede conversaria
 com a memória do Zeus. A página em si é pública; nenhuma rota de dado responde
-sem chave válida, e a comparação é de tempo constante.
+sem sessão válida, e a comparação é de tempo constante.
 
 ## O que a interface mostra
 

@@ -6,14 +6,21 @@ transporte é SSE: o navegador abre um fluxo e o servidor empurra estado,
 mensagem e áudio. É menos poderoso que WebSocket e dispensa implementar
 protocolo à mão, o que mantém a promessa de biblioteca padrão.
 
-Segurança: a chave é obrigatória. Sem ela, qualquer um na mesma rede
-conversaria com a memória de Nicolas. A comparação é de tempo constante e a
-página só recebe a chave que já estava na URL que ele abriu.
+Segurança: sem sessão, nenhuma rota de dado responde. A chave (`chave_hud`)
+ou, na falta dela, um código de pareamento de uso único é enviado uma vez por
+POST e trocado por um cookie HttpOnly e SameSite=Strict. A chave nunca viaja
+na URL — URL fica em histórico, favorito e log — e nunca é impressa no log do
+serviço. Tentativas erradas têm limite por endereço e no total.
 """
 
+import hashlib
 import hmac
+import http.cookies
 import json
+import os
 import queue
+import time
+from collections import deque
 import shutil
 import socket
 import ssl
@@ -30,6 +37,17 @@ from ..saude import Saude
 PAGINA = Path(__file__).resolve().parent / "index.html"
 LIMITE_DE_MENSAGEM = 4000
 LIMITE_DE_AUDIO = 12 * 1024 * 1024
+
+COOKIE = "zeus_sessao"
+DURACAO_DA_SESSAO = 30 * 24 * 3600
+DURACAO_DO_CODIGO = 15 * 60
+JANELA_DE_FALHAS = 60
+FALHAS_POR_ENDERECO = 5
+FALHAS_NO_TOTAL = 30
+
+
+def _resumo(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def endereco_local() -> str:
@@ -78,9 +96,17 @@ class ServidorHUD:
     def __init__(self, enfileirar, voz=None, chave: str = "",
                  host: str = "0.0.0.0", porta: int = 8770, estado=None,
                  pasta_de_escuta=None, certificado=None, chave_tls=None,
-                 saude=None, mapa=None):
-        if not chave:
-            raise ValueError("A HUD exige uma chave de acesso.")
+                 saude=None, mapa=None, codigo_unico: str = "",
+                 arquivo_de_sessoes=None, relogio=None):
+        if not chave and not codigo_unico:
+            raise ValueError("A HUD exige uma chave de acesso ou um código de pareamento.")
+        self._relogio = relogio or time.time
+        self._codigo = codigo_unico or ""
+        self._codigo_expira = self._relogio() + DURACAO_DO_CODIGO
+        self.arquivo_de_sessoes = Path(arquivo_de_sessoes) if arquivo_de_sessoes else None
+        self._sessoes = self._carregar_sessoes()
+        self._falhas = {}
+        self._falhas_no_total = deque()
         self.enfileirar = enfileirar    # callable(dict)
         self._retrato = dict(estado or {"tipo": "estado"})
         self.pasta_de_escuta = Path(pasta_de_escuta) if pasta_de_escuta else None
@@ -142,7 +168,73 @@ class ServidorHUD:
                 self.assinantes.remove(fila)
 
     def autorizado(self, chave: str) -> bool:
-        return bool(chave) and hmac.compare_digest(str(chave), self.chave)
+        """Chave por cabeçalho, para cliente de linha de comando e testes."""
+        return bool(chave) and bool(self.chave) and hmac.compare_digest(str(chave), self.chave)
+
+    # -------------------------------------------------------------- sessão
+    def _carregar_sessoes(self):
+        if not self.arquivo_de_sessoes or not self.arquivo_de_sessoes.exists():
+            return {}
+        try:
+            dados = json.loads(self.arquivo_de_sessoes.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        agora = self._relogio()
+        return {k: v for k, v in dados.items() if isinstance(v, (int, float)) and v > agora}
+
+    def _gravar_sessoes(self):
+        """Só o hash do token vai para o disco: o arquivo não abre a HUD."""
+        if not self.arquivo_de_sessoes:
+            return
+        self.arquivo_de_sessoes.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        temporario = self.arquivo_de_sessoes.with_suffix(".tmp")
+        fd = os.open(temporario, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as saida:
+            json.dump(self._sessoes, saida)
+        os.replace(temporario, self.arquivo_de_sessoes)
+
+    def _limite(self, endereco):
+        agora = self._relogio()
+        falhas = [t for t in self._falhas.get(endereco, []) if agora - t < JANELA_DE_FALHAS]
+        self._falhas[endereco] = falhas
+        while self._falhas_no_total and agora - self._falhas_no_total[0] >= JANELA_DE_FALHAS:
+            self._falhas_no_total.popleft()
+        return len(falhas) >= FALHAS_POR_ENDERECO or len(self._falhas_no_total) >= FALHAS_NO_TOTAL
+
+    def entrar(self, segredo: str, endereco: str):
+        """Troca chave ou código de pareamento por uma sessão.
+
+        Devolve ("ok", token), ("negado", None) ou ("limite", segundos)."""
+        with self.trava:
+            if self._limite(endereco):
+                return "limite", JANELA_DE_FALHAS
+            agora = self._relogio()
+            valido = self.autorizado(segredo)
+            if not valido and self._codigo and agora < self._codigo_expira:
+                valido = bool(segredo) and hmac.compare_digest(str(segredo), self._codigo)
+                if valido:
+                    self._codigo = ""       # uso único: o log antigo não abre mais nada
+            if not valido:
+                self._falhas.setdefault(endereco, []).append(agora)
+                self._falhas_no_total.append(agora)
+                return "negado", None
+            token = secrets_token()
+            self._sessoes[_resumo(token)] = agora + DURACAO_DA_SESSAO
+            self._sessoes = {k: v for k, v in self._sessoes.items() if v > agora}
+            self._gravar_sessoes()
+            return "ok", token
+
+    def sessao_valida(self, token: str) -> bool:
+        if not token:
+            return False
+        with self.trava:
+            expira = self._sessoes.get(_resumo(token))
+            return bool(expira and expira > self._relogio())
+
+    def sair(self, token: str):
+        with self.trava:
+            if self._sessoes.pop(_resumo(token or ""), None) is not None:
+                self._gravar_sessoes()
 
     # ------------------------------------------------------------ operação
     @property
@@ -168,6 +260,11 @@ class ServidorHUD:
             self._servidor = None
 
 
+def secrets_token() -> str:
+    import secrets
+    return secrets.token_urlsafe(32)
+
+
 def _construir(hud: ServidorHUD):
     class Manipulador(BaseHTTPRequestHandler):
         server_version = "Zeus"
@@ -177,22 +274,48 @@ def _construir(hud: ServidorHUD):
             pass  # o log do Zeus é o fluxo de eventos, não o do http.server
 
         # ---------------------------------------------------------- apoio
-        def _chave(self):
-            consulta = parse_qs(urlparse(self.path).query)
-            return (self.headers.get("X-Zeus-Chave")
-                    or (consulta.get("chave") or [""])[0])
+        def _token(self):
+            biscoitos = http.cookies.SimpleCookie()
+            try:
+                biscoitos.load(self.headers.get("Cookie") or "")
+            except http.cookies.CookieError:
+                return ""
+            return biscoitos[COOKIE].value if COOKIE in biscoitos else ""
 
-        def _responder(self, codigo, corpo=b"", tipo="application/json; charset=utf-8"):
+        def _liberado(self):
+            """Sessão por cookie, ou chave por cabeçalho. Nunca por URL."""
+            return (hud.sessao_valida(self._token())
+                    or hud.autorizado(self.headers.get("X-Zeus-Chave", "")))
+
+        def _origem_ok(self):
+            """Mutação vinda de outra origem é recusada. Sem Origin (curl,
+            teste), vale a sessão — o cookie SameSite=Strict já não viaja
+            em pedido de outro site."""
+            origem = self.headers.get("Origin")
+            return not origem or urlparse(origem).netloc == (self.headers.get("Host") or "")
+
+        def _biscoito(self, token, duracao):
+            partes = [f"{COOKIE}={token}", "Path=/", "HttpOnly", "SameSite=Strict",
+                      f"Max-Age={duracao}"]
+            if hud.seguro:
+                partes.append("Secure")
+            return "; ".join(partes)
+
+        def _responder(self, codigo, corpo=b"", tipo="application/json; charset=utf-8",
+                       extras=None):
             self.send_response(codigo)
             self.send_header("Content-Type", tipo)
             self.send_header("Content-Length", str(len(corpo)))
             self.send_header("Cache-Control", "no-store")
+            for nome, valor in (extras or {}).items():
+                self.send_header(nome, valor)
             self.end_headers()
             if corpo:
                 self.wfile.write(corpo)
 
-        def _json(self, codigo, dados):
-            self._responder(codigo, json.dumps(dados, ensure_ascii=False).encode("utf-8"))
+        def _json(self, codigo, dados, extras=None):
+            self._responder(codigo, json.dumps(dados, ensure_ascii=False).encode("utf-8"),
+                            extras=extras)
 
         def _tamanho(self, limite):
             try:
@@ -229,8 +352,11 @@ def _construir(hud: ServidorHUD):
             if caminho == "/favicon.ico":
                 # O navegador pede sozinho; negar com 401 só suja o console.
                 return self._responder(204, b"", "image/x-icon")
-            if not hud.autorizado(self._chave()):
-                return self._json(401, {"erro": "chave inválida"})
+            if caminho == "/sessao":
+                return self._json(200, {"autenticado": self._liberado(),
+                                        "pareamento": bool(hud._codigo)})
+            if not self._liberado():
+                return self._json(401, {"erro": "sessão ausente ou vencida"})
             if caminho == "/estado":
                 return self._json(200, hud.estado())
             if caminho == "/saude":
@@ -251,8 +377,16 @@ def _construir(hud: ServidorHUD):
 
         def do_POST(self):
             caminho = urlparse(self.path).path
-            if not hud.autorizado(self._chave()):
-                return self._json(401, {"erro": "chave inválida"})
+            if not self._origem_ok():
+                return self._json(403, {"erro": "origem não permitida"})
+            if caminho == "/sessao":
+                return self._entrar()
+            if not self._liberado():
+                return self._json(401, {"erro": "sessão ausente ou vencida"})
+            if caminho == "/sessao/sair":
+                hud.sair(self._token())
+                return self._json(200, {"saiu": True},
+                                  extras={"Set-Cookie": self._biscoito("", 0)})
             if caminho == "/escuta":
                 return self._escuta()
             if caminho != "/mensagem":
@@ -270,6 +404,26 @@ def _construir(hud: ServidorHUD):
             if not texto:
                 return self._json(400, {"erro": "mensagem vazia"})
             return self._enfileirar({"tipo": "texto", "texto": texto[:LIMITE_DE_MENSAGEM]})
+
+        def _entrar(self):
+            tamanho = self._tamanho(512)
+            if tamanho is None:
+                return
+            try:
+                dados = json.loads(self.rfile.read(tamanho) or b"{}")
+                segredo = dados.get("chave", "") if isinstance(dados, dict) else ""
+                if not isinstance(segredo, str):
+                    raise ValueError
+            except (ValueError, UnicodeDecodeError):
+                return self._json(400, {"erro": "corpo inválido"})
+            resultado, valor = hud.entrar(segredo.strip(), self.client_address[0])
+            if resultado == "limite":
+                return self._json(429, {"erro": "tentativas demais; espere um minuto"},
+                                  extras={"Retry-After": str(valor)})
+            if resultado != "ok":
+                return self._json(401, {"erro": "chave ou código inválido"})
+            return self._json(200, {"autenticado": True},
+                              extras={"Set-Cookie": self._biscoito(valor, DURACAO_DA_SESSAO)})
 
         def _escuta(self):
             if hud.pasta_de_escuta is None:

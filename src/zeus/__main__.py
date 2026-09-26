@@ -188,6 +188,16 @@ def retrato(store, config, voz, modelo="", ouvidos=None):
     }
 
 
+def situacao_da_chave(chave: str) -> str:
+    """Diz se a chave da HUD é fraca, sem nunca mostrar a chave."""
+    if not chave:
+        return "sem chave definida: um código de pareamento de uso único a cada início"
+    if len(chave) < 20:
+        return ("configurada, mas curta: use 24 ou mais caracteres aleatórios "
+                "(python3 -c \"import secrets;print(secrets.token_urlsafe(24))\")")
+    return "configurada"
+
+
 def ligar_modelo(zeus, config):
     """Verificação obrigatória antes de usar o modelo em qualquer conversa."""
     provedor = criar_provedor(config)
@@ -337,7 +347,7 @@ def main():
                  acoes=montar_acoes(config).diagnostico(),
                  contexto=diagnostico_do_contexto(config, persona_de(config)),
                  mapa=montar_mapa(config, args.state_dir.expanduser()).diagnostico(),
-                 hud="configurada" if config.chave_hud else "sem chave definida",
+                 hud=situacao_da_chave(config.chave_hud),
                  config=config.sem_segredos())
             return 0 if integrity == "ok" and modelo_verificado else 1
 
@@ -719,7 +729,11 @@ def _executar(zeus, store, config):
     ouvidos = montar_ouvidos(config, estado_local)
     recebidas_da_hud = CaixaDeEntrada(maxsize=32)
     hud, endereco = None, None
-    chave = config.chave_hud or secrets.token_urlsafe(12)
+    # Sem chave configurada, um código de pareamento de uso único, válido por
+    # quinze minutos. Ele aparece no log uma vez; depois de usado, o log antigo
+    # não abre mais nada. A chave configurada nunca é impressa.
+    chave = config.chave_hud
+    codigo = "" if chave else secrets.token_urlsafe(9)
     try:
         from .hud import ServidorHUD, endereco_local, garantir_certificado
         certificado, chave_tls = (None, None)
@@ -731,6 +745,7 @@ def _executar(zeus, store, config):
                 emit("tls_indisponivel", detalhe="openssl ausente; a HUD sobe sem TLS")
         hud = ServidorHUD(
             enfileirar=recebidas_da_hud.put_nowait, voz=voz, chave=chave,
+            codigo_unico=codigo, arquivo_de_sessoes=estado_local / "hud" / "sessoes.json",
             host=config.hud_host, porta=config.hud_porta,
             estado=retrato(store, config, voz, servido if modelo_ok else "", ouvidos),
             pasta_de_escuta=ouvidos.destino,
@@ -738,10 +753,13 @@ def _executar(zeus, store, config):
             certificado=certificado, chave_tls=chave_tls)
         porta = hud.iniciar()
         esquema = "https" if hud.seguro else "http"
-        endereco = f"{esquema}://{endereco_local()}:{porta}/?chave={chave}"
+        endereco = f"{esquema}://{endereco_local()}:{porta}/"
     except Exception as erro:
         emit("hud_indisponivel", detalhe=str(erro)[:200])
 
+    if hud is not None and codigo:
+        emit("hud_pareamento", codigo=codigo, validade_min=15, uso="único",
+             detalhe="Digite o código na página. Para não depender dele, defina chave_hud.")
     emit("started", version=__version__, modelo=servido, modelo_ok=modelo_ok,
          canal=(zeus.canal.nome if zeus.canal else "nenhum"),
          voz=voz.diagnostico(), ouvidos=ouvidos.diagnostico(),
