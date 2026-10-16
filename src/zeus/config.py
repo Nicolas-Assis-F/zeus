@@ -92,13 +92,44 @@ class Config:
     intervalo_monitor: int = 30
     intervalo_recuperacao_modelo: int = 30
     espera_telegram: int = 25
+    # Canal de conversa: "telegram", "whatsapp" ou vazio (Telegram, se
+    # configurado). Um canal de conversa por vez; a HUD vale sempre.
+    canal: str = ""
+    # WhatsApp pelo número do Zeus (ponte B): a API local da ponte, o banco
+    # que ela grava, o grupo com Nicolas e quem nele pode dar ordem. Em grupo o
+    # WhatsApp identifica o remetente pelo LID, não pelo telefone: use
+    # `./zeus whatsapp` para descobrir os valores certos.
+    whatsapp_ponte_url: str = "http://127.0.0.1:8081"
+    whatsapp_banco: str = ""
+    whatsapp_grupo: str = ""
+    whatsapp_remetentes: tuple = ()
+    # Número principal de Nicolas (ponte A), só leitura. Cada item é `jid` ou
+    # `jid=Rótulo`; lista vazia desliga o vigia. O rótulo é o nome que o Zeus
+    # usa no aviso, para não depender do nome que o próprio contato escolheu.
+    principal_banco: str = ""
+    principal_acompanhados: tuple = ()
+    intervalo_principal: int = 15
     # Preenchido por carregar(): dizer de onde a configuração veio evita a
     # confusão de editar um arquivo que o programa nunca lê.
     origem: str = "nenhum arquivo lido"
 
     @property
+    def canal_escolhido(self) -> str:
+        whatsapp = bool(self.whatsapp_banco and self.whatsapp_grupo and self.whatsapp_remetentes)
+        telegram = bool(self.telegram_token and self.telegram_chat_id)
+        if self.canal == "whatsapp":
+            return "whatsapp" if whatsapp else ""
+        if self.canal in ("", "telegram"):
+            return "telegram" if telegram else ""
+        return ""
+
+    @property
     def canal_configurado(self) -> bool:
-        return bool(self.telegram_token and self.telegram_chat_id)
+        return bool(self.canal_escolhido)
+
+    @property
+    def vigia_configurado(self) -> bool:
+        return bool(self.principal_banco and self.principal_acompanhados)
 
     def sem_segredos(self) -> dict:
         """Representação segura para log: nenhum token aparece."""
@@ -106,7 +137,8 @@ class Config:
         for campo in fields(self):
             valor = getattr(self, campo.name)
             if campo.name in ("openrouter_chave", "telegram_token", "telegram_chat_id",
-                              "chave_hud"):
+                              "chave_hud", "whatsapp_grupo", "whatsapp_remetentes",
+                              "principal_acompanhados"):
                 dados[campo.name] = "definido" if valor else "ausente"
             else:
                 dados[campo.name] = valor

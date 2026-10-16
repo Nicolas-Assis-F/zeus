@@ -47,5 +47,13 @@
   "atraso_maximo_lembrete": 86400,
   "monitorar_modelo": false,
   "intervalo_monitor": 30,
-  "intervalo_recuperacao_modelo": 30
+  "intervalo_recuperacao_modelo": 30,
+  "canal": "",
+  "whatsapp_ponte_url": "http://127.0.0.1:8081",
+  "whatsapp_banco": "",
+  "whatsapp_grupo": "",
+  "whatsapp_remetentes": [],
+  "principal_banco": "",
+  "principal_acompanhados": [],
+  "intervalo_principal": 15
 }

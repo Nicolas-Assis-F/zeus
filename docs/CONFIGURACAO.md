@@ -28,6 +28,8 @@ sobre o arquivo, o que permite testar um modelo sem editar configuração.
 | `openrouter_chave` | Chave do OpenRouter, quando o provedor for remoto |
 | `telegram_token` | Token do bot criado no BotFather |
 | `telegram_chat_id` | Conversa autorizada. Nenhuma outra é aceita |
+| `canal` | `whatsapp` troca o Telegram pelo grupo do WhatsApp; vazio mantém o Telegram |
+| `whatsapp_*`, `principal_*` | Pontes do WhatsApp e vigia do número principal. Veja [WhatsApp](WHATSAPP.md) |
 | `keep_alive` | Quanto tempo o Ollama mantém o modelo carregado |
 | `pesquisa_provedor` | `nenhum`, `duckduckgo` ou `searxng` — ver docs/PESQUISA.md |
 | `pesquisa_url` | Endereço do SearXNG próprio, quando for o provedor |
