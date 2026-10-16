@@ -14,6 +14,7 @@ mais dura que na pesquisa, e garantida pelo código:
   texto de outra pessoa nunca apareça para o modelo como fala do próprio Zeus.
 """
 
+import json
 from datetime import datetime, timezone
 
 from .canais.whatsapp import LeituraDaPonte, lista
@@ -22,6 +23,11 @@ from .guarda import limpar_resposta
 TIPO_DO_AVISO = "aviso_terceiro"
 MAXIMO_DE_MENSAGENS = 8
 MAXIMO_POR_MENSAGEM = 500
+# Contatos que Nicolas liberou num ponto quente (`quentes.py`): `{jid: rótulo}`.
+LIBERADOS = "quentes_liberados"
+# Linha da ponte em que cada um foi liberado: o que veio até ali já saiu
+# no aviso da liberação e não é avisado de novo. `{jid: linha}`.
+LIBERADOS_DESDE = "quentes_liberados_desde"
 
 INSTRUCAO_DO_RASCUNHO = (
     "Você prepara um rascunho de resposta que Nicolas pode mandar, do número dele, "
@@ -52,33 +58,49 @@ class VigiaPrincipal:
         self.store = store
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
 
+    def todas(self) -> dict:
+        """As da configuração mais as liberadas no grupo. O rótulo da
+        configuração vale mais: foi escrito por Nicolas com calma."""
+        try:
+            liberadas = json.loads(self.store.kv_get(LIBERADOS) or "{}")
+        except ValueError:
+            liberadas = {}
+        return {**liberadas, **self.conversas}
+
     def lotes(self):
         """Agrupa por conversa o que chegou desde a última leitura.
 
         Devolve (lotes, maior_linha). O cursor só anda com `avancar`, depois
         que os avisos estão na fila: uma queda no meio não perde mensagem."""
-        if not self.conversas:
-            return [], None
         cursor = self.store.kv_get(self.CURSOR)
         if cursor is None:
-            # Primeira vez: o histórico que já estava lá não é novidade.
+            # Primeira vez: o histórico que já estava lá não é novidade. Marca
+            # mesmo sem conversa nenhuma, para a primeira liberada não perder
+            # o que chegar entre a liberação e a rodada seguinte.
             self.store.kv_set(self.CURSOR, self.leitura.ultima_linha())
             self.store.kv_set(self.DESDE, self.relogio().isoformat())
             return [], None
+        conversas = self.todas()
+        if not conversas:
+            return [], None
+        try:
+            piso = json.loads(self.store.kv_get(LIBERADOS_DESDE) or "{}")
+        except ValueError:
+            piso = {}
         desde = self.store.kv_get(self.DESDE)
         desde = datetime.fromisoformat(desde) if desde else None
-        novas = self.leitura.novas(int(cursor), chats=tuple(self.conversas), desde=desde)
+        novas = self.leitura.novas(int(cursor), chats=tuple(conversas), desde=desde)
         if not novas:
             return [], None
         por_conversa = {}
         for m in novas:
             # Sincronização de histórico regrava mensagem velha com rowid novo.
-            if m["antiga"] or not m["texto"]:
+            if m["antiga"] or not m["texto"] or m["linha"] <= int(piso.get(m["chat"], 0)):
                 continue
             por_conversa.setdefault(m["chat"], []).append(m)
         lotes = []
         for chat, mensagens in por_conversa.items():
-            lotes.append({"chat": chat, "rotulo": self.conversas.get(chat, ""),
+            lotes.append({"chat": chat, "rotulo": conversas.get(chat, ""),
                           "mensagens": mensagens,
                           "chave": f"principal:{chat}:{mensagens[-1]['id']}"})
         return lotes, max(m["linha"] for m in novas)

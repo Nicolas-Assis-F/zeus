@@ -59,6 +59,30 @@ Depois de configurar, confira:
 ./zeus check --canal
 ```
 
+## Pontos quentes (#52)
+
+Além dos acompanhados, o Zeus olha as conversas 1:1 do número principal de quem está no CRM da LE. Para cada lote novo, o modelo dá um nível de interesse (`quente`, `morno` ou `frio`) e um motivo curto. Os níveis de `quentes_niveis` viram aviso numerado no grupo, com o que o CRM diz do contato. Se o modelo não responde no formato, o aviso sai como `indefinido`.
+
+Nicolas responde no grupo, com a mensagem sozinha:
+
+- `liberar N`: o contato entra no vigia. O Zeus lê as últimas mensagens dele e manda um rascunho na hora; daí em diante avisa como faz com os acompanhados.
+- `bloquear N`: o Zeus ignora esse contato daqui em diante.
+
+Enquanto um ponto aguarda decisão, novas mensagens do mesmo contato não geram outro aviso. Os comandos são reconhecidos pelo código, sem passar pelo modelo.
+
+```json
+{
+  "principal_crm": "/home/<usuario>/Documents/sistemale/sistemale/data/crm/leads.json",
+  "quentes_niveis": ["quente", "morno"],
+  "quentes_tipos_ignorados": ["fornecedor", "concorrente", "transportadora"]
+}
+```
+
+- `principal_crm`: o `leads.json` do CRM. Vazio desliga os pontos quentes.
+- `principal_sessao`: o `whatsapp.db` da ponte A, lido só na tabela que liga LID a telefone. Vazio usa o que fica ao lado de `principal_banco`.
+- Conversa de quem não está no CRM nunca é lida: não vai para o modelo nem sai da máquina.
+- O estado fica no `kv`: `quentes_pendentes`, `quentes_liberados`, `quentes_bloqueados`. Para desfazer um bloqueio, tire o `jid` de `quentes_bloqueados`.
+
 ## Segurança
 
 A regra da #9 vale aqui também: o que chega de terceiros é dado, não instrução. Ela é garantida pelo código, não pela persona:

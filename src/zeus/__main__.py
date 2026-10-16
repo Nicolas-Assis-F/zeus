@@ -307,6 +307,7 @@ def main():
                     canal = f"falhou: {erro}"
             voz = montar_voz(config)
             ouvidos = montar_ouvidos(config, args.state_dir.expanduser())
+            from .quentes import diagnostico as diagnostico_dos_quentes
             emit("storage_check", version=__version__, storage=integrity,
                  modelo=modelo, canal=canal, voz=voz.diagnostico(),
                  ouvidos=ouvidos.diagnostico(),
@@ -316,6 +317,7 @@ def main():
                  mapa=montar_mapa(config, args.state_dir.expanduser()).diagnostico(),
                  hud="configurada" if config.chave_hud else "sem chave definida",
                  vigia_principal="configurado" if config.vigia_configurado else "desligado",
+                 pontos_quentes=diagnostico_dos_quentes(config),
                  config=config.sem_segredos())
             return 0 if integrity == "ok" and modelo_verificado else 1
 
@@ -643,6 +645,7 @@ def _executar(zeus, store, config):
     emit("started", version=__version__, modelo=servido, modelo_ok=modelo_ok,
          canal=(zeus.canal.nome if zeus.canal else "nenhum"),
          vigia_principal="ligado" if (config.vigia_configurado and zeus.canal) else "desligado",
+         pontos_quentes="ligado" if (config.quentes_configurado and zeus.canal) else "desligado",
          voz=voz.diagnostico(), ouvidos=ouvidos.diagnostico(),
          hud=endereco or "desligada")
 
@@ -741,10 +744,17 @@ def _executar(zeus, store, config):
         if fala and voz.disponivel():
             fala.falar(saudacao, 0)
 
-    vigia, proxima_vigia = None, 0.0
-    if config.vigia_configurado and zeus.canal is not None:
+    vigia, quentes, proxima_vigia = None, None, 0.0
+    # Liberar um ponto quente põe o contato no vigia, então o vigia roda
+    # também quando só os pontos quentes estão configurados.
+    if (config.vigia_configurado or config.quentes_configurado) and zeus.canal is not None:
         from .principal import VigiaPrincipal
         vigia = VigiaPrincipal(config.principal_banco, config.principal_acompanhados, store)
+    if config.quentes_configurado and zeus.canal is not None:
+        from .quentes import VigiaDeQuentes
+        quentes = VigiaDeQuentes(config.principal_banco, config.sessao_principal,
+                                 config.principal_crm, store, config.principal_acompanhados,
+                                 config.quentes_tipos_ignorados)
 
     ultimo_batimento = 0.0
     while not stopped.is_set():
@@ -768,6 +778,14 @@ def _executar(zeus, store, config):
                     # conversa: o vigia tenta de novo na próxima rodada.
                     avisos = []
                     emit("vigia_indisponivel", detalhe=str(erro)[:200])
+                if quentes is not None:
+                    from .quentes import rodada_de_quentes
+                    try:
+                        avisos += rodada_de_quentes(quentes, fila_de_saida, store, zeus.canal.nome,
+                                                    zeus.provedor if modelo_ok else None,
+                                                    config.quentes_niveis)
+                    except Exception as erro:
+                        emit("quentes_indisponivel", detalhe=str(erro)[:200])
                 for aviso in avisos:
                     anunciar("zeus", aviso)
             for _ in range(4):
@@ -790,8 +808,19 @@ def _executar(zeus, store, config):
                             continue
                         texto = "\n".join(m["texto"] for m in recebidas)
                         anunciar("nicolas", texto)
-                        resposta = com_aviso_de_digitacao(
-                            zeus.canal, lambda: responder(texto, nome_do_canal))
+                        from .quentes import comando, decidir
+                        decisao = comando(texto) if quentes is not None else None
+                        if decisao is not None:
+                            # Quem o Zeus lê é decisão de Nicolas, aplicada
+                            # pelo código: não passa por geração do modelo.
+                            from .canais.whatsapp import LeituraDaPonte
+                            store.registrar_turno(nome_do_canal, "nicolas", texto)
+                            resposta = decidir(store, *decisao, fila_de_saida, nome_do_canal,
+                                               LeituraDaPonte(config.principal_banco),
+                                               zeus.provedor if modelo_ok else None)
+                        else:
+                            resposta = com_aviso_de_digitacao(
+                                zeus.canal, lambda: responder(texto, nome_do_canal))
                         fila_de_saida.concluir_resposta(chave_resposta, resposta,
                                                         canal=nome_do_canal)
                         anunciar("zeus", resposta)
