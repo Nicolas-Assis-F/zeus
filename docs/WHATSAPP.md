@@ -109,6 +109,20 @@ Onde a mídia aparece:
 - **Vigia:** o áudio do contato acompanhado vem transcrito no aviso. É dado de terceiro, só no aviso e no rascunho sem ferramentas.
 - **`ler_conversa`:** os 4 áudios mais recentes vêm transcritos; as outras mídias vêm com o id para `ler_midia`.
 
+## Orçamento em PDF (#62)
+
+Nicolas pede no grupo ("faz um orçamento pro Ítalo de um cabeçote de 80 m…"). O Zeus pergunta o que faltar do cliente e chama `preparar_orcamento`, que devolve o resumo com itens, preços, total, pagamento e entrega. Quando Nicolas confirma numa **mensagem nova**, `gerar_orcamento` gera o PDF e manda **no grupo**.
+
+As travas são do código:
+
+- **Preço** vem de `precos.json`, na base de conhecimento, que só tem preço praticado APROVADO. Preço que o modelo escreve é ignorado. Item sem preço aprovado só entra com `preco_informado_centavos`, que é o valor dito por Nicolas, e o resumo mostra "valor que você informou".
+- **Confirmação:** gerar na mesma resposta em que preparou é recusado, e a mensagem de Nicolas precisa confirmar ("ok", "pode", "confirmo", "gera"…). As duas ferramentas não rodam depois de conteúdo externo.
+- **Destino:** `CanalWhatsApp.enviar_arquivo` fixa o grupo como destinatário. Para cliente não vai.
+- **Numeração de teste** `ZT{AAMM}-NNNN`, mensal, com trava de arquivo; o número usado não volta. Sem o `CU…` oficial, o código de cliente é `ZC…`.
+- **Nada no banco do sistemale nem na memória do Zeus.** Rascunho, PDF, registro e sequência ficam em `orcamentos_pasta` (padrão `~/.local/share/zeus/orcamentos`), fora do git. O logo fica lá como `LOGO.jpg`.
+
+O PDF é escrito direto, sem navegador e sem dependência nova: Helvetica e Helvetica-Bold padrão em WinAnsi, nas coordenadas de `orcamentos.md`, como no modelo SO2609-0004. O bloco "De" usa a versão limpa, com o telefone (62) 98601-8386, e o cabeçalho traz "ORÇAMENTO, SEM VALOR DE PEDIDO".
+
 ## Segurança
 
 A regra da #9 vale aqui também: o que chega de terceiros é dado, não instrução. Ela é garantida pelo código, não pela persona:

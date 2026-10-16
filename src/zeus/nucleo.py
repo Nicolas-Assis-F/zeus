@@ -100,6 +100,10 @@ class Zeus:
         de o modelo começar a escrever e então decidir usar uma ferramenta, e
         o rascunho descartado não pode ficar na tela como se fosse resposta."""
         agora = self.relogio()
+        # Ferramenta que exige confirmação numa mensagem nova (o orçamento)
+        # precisa saber quando e com que texto esta troca começou.
+        self.ferramentas.inicio_do_turno = agora
+        self.ferramentas.mensagem_do_turno = texto
         respondida = self._vincular_resposta(texto, agora)
         mensagens = self._historico(texto)
         self.store.registrar_turno(canal, "nicolas", texto, agora)

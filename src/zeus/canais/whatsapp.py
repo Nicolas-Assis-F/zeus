@@ -260,9 +260,17 @@ class CanalWhatsApp:
         pass
 
     def enviar(self, texto: str):
+        return self._postar({"message": texto})
+
+    def enviar_arquivo(self, caminho: str, legenda: str = ""):
+        """Um arquivo (o PDF do orçamento) para o grupo. O destinatário não é
+        parâmetro: nada escrito na conversa consegue mandar o arquivo a outro."""
+        return self._postar({"message": legenda, "media_path": str(caminho)})
+
+    def _postar(self, corpo: dict):
         try:
             status, dados = self.transporte(self.ponte_url + "/api/send",
-                                            {"recipient": self.grupo, "message": texto})
+                                            {**corpo, "recipient": self.grupo})
         except (ConnectionRefusedError, urllib.error.URLError) as erro:
             motivo = getattr(erro, "reason", erro)
             if isinstance(motivo, ConnectionRefusedError):
