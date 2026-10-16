@@ -34,3 +34,13 @@ As travas são do próprio Claude Code: `--permission-mode dontAsk` só deixa ro
 ## Barreira da #9
 
 `preparar_tarefa` e `iniciar_tarefa` mudam estado, então não rodam depois de conteúdo externo na mesma resposta. "Leia o Henrique e faça" vira leitura e resumo; a tarefa só é preparada na mensagem seguinte de Nicolas, e só começa quando ele aprova o texto. O resumo de fim vem de um agente que leu o repositório e chega como aviso, fora do histórico da conversa.
+
+## Base viva (#66)
+
+Quando Nicolas comunica uma decisão que muda a base de conhecimento ("aprovei o martelo a 3.990", "o Ivomar quitou"), o Zeus chama `propor_atualizacao_base(arquivo, mudanca)` e mostra a proposta. Quando Nicolas aprova numa mensagem nova, `iniciar_tarefa`:
+
+1. copia a base inteira para `tarefas/base-N-copia/`, para desfazer;
+2. roda `claude -p` dentro da pasta da base só com `Read`, `Edit`, `Glob` e `Grep`: sem Bash, sem criar arquivo, sem rede, até US$ 1;
+3. o Claude muda só o necessário, com a data e a fonte "decisão de Nicolas no grupo do Zeus, DD/MM/AAAA", guarda o valor anterior e, se for preço, atualiza o `precos.json` no mesmo SKU.
+
+O aviso de fim diz o que mudou e onde está a cópia. O Zeus nunca edita a base direto, e a proposta não roda depois de conteúdo externo: o que o Henrique diz que aconteceu só vira atualização se Nicolas afirmar.

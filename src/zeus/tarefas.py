@@ -82,6 +82,23 @@ Regras desta execução:
   ou o motivo de não ter aberto."""
 COPIAR = (".env", ".env.local")
 
+# Base viva (#66): atualizar a base de conhecimento quando Nicolas decide algo.
+# Sem Bash, sem rede, sem criar arquivo: só ler e editar dentro da pasta.
+BASE_LIBERADAS = ["Read", "Edit", "Glob", "Grep"]
+BASE_NEGADAS = ["Bash", "Write", "NotebookEdit", "WebFetch", "WebSearch"]
+REGRAS_DA_BASE = """Você é o Claude Code no X99, mantendo a base de conhecimento do Zeus (esta pasta).
+Nicolas decidiu algo e aprovou esta atualização no grupo, em {data}.
+Regras:
+- Leia o LEIA-ME.md e o arquivo indicado antes de mudar.
+- Mude só o necessário para refletir a decisão. Onde o valor ou a situação mudou, ponha a data
+  {data} e a fonte "decisão de Nicolas no grupo do Zeus, {data}". Não apague histórico útil:
+  se um valor foi substituído, deixe registrado o anterior e a data dele.
+- Preço mudou no catalogo-e-precos.md? Mude também no precos.json, no mesmo SKU. Só preço com
+  status APROVADO entra no precos.json.
+- Não invente nada além do que o pedido diz. Se o pedido for ambíguo ou contradisser a base de
+  um jeito que você não sabe resolver, não mude: explique o conflito.
+- Termine com um resumo curto em português do Brasil: arquivo, seção, valor antes e depois."""
+
 
 class TarefaRecusada(ValueError):
     pass
@@ -116,7 +133,7 @@ def rodar_git(argumentos, cwd):
 class Tarefas:
     def __init__(self, pasta: str, repositorios: dict, relogio=None, claude: str = "claude",
                  limite_minutos: int = 45, orcamento_usd: float = 5.0, git=rodar_git,
-                 iniciar_processo=None):
+                 iniciar_processo=None, base: str = ""):
         self.pasta = Path(os.path.expanduser(pasta))
         self.repositorios = repositorios
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
@@ -125,6 +142,7 @@ class Tarefas:
         self.orcamento_usd = orcamento_usd
         self.git = git
         self.iniciar_processo = iniciar_processo or self._iniciar_processo
+        self.base = Path(os.path.expanduser(base)) if base else None
 
     # ------------------------------------------------------------- registro
     def _registro(self, numero) -> Path:
@@ -184,6 +202,30 @@ class Tarefas:
                   f"US$ {self.orcamento_usd:.2f}.\n\nPosso começar?")
         return {"numero": numero, "resumo": resumo}
 
+    def preparar_base(self, arquivo: str, mudanca: str) -> dict:
+        """A decisão de Nicolas vira proposta de atualização da base."""
+        if self.base is None or not self.base.is_dir() or self.base.is_symlink():
+            raise TarefaRecusada("A base de conhecimento não está configurada.")
+        arquivo = str(arquivo or "").strip()
+        alvo = self.base / arquivo
+        if ("/" in arquivo or arquivo.startswith(".") or not arquivo.endswith((".md", ".json"))
+                or alvo.is_symlink() or not alvo.is_file()):
+            raise TarefaRecusada("Arquivo da base desconhecido. Use um destes: " + ", ".join(
+                sorted(p.name for p in self.base.iterdir()
+                       if p.suffix in (".md", ".json") and not p.is_symlink())) + ".")
+        mudanca = str(mudanca or "").strip()
+        if len(mudanca) < 10:
+            raise TarefaRecusada("Descreva a decisão: o que mudou, de quanto para quanto.")
+        numero = max([t["numero"] for t in self.todas()] + [0]) + 1
+        tarefa = {"numero": numero, "tipo": "base", "projeto": "base", "arquivo": arquivo,
+                  "titulo": f"Atualizar {arquivo}", "pedido": f"Arquivo: {arquivo}\n\n{mudanca}",
+                  "situacao": "aguardando", "criada_em": self.relogio().isoformat(), "branch": ""}
+        self._gravar(tarefa)
+        resumo = (f"Atualização #{numero} da base ({arquivo}):\n\n{mudanca}\n\n"
+                  "O Claude aplica com a data de hoje e a fonte \"decisão sua no grupo\". Antes, "
+                  "faço uma cópia da base para desfazer se precisar.\n\nPosso aplicar?")
+        return {"numero": numero, "resumo": resumo}
+
     def iniciar(self, numero, inicio_do_turno, mensagem: str) -> dict:
         tarefa = self._ler(numero)
         if tarefa["situacao"] != "aguardando":
@@ -196,6 +238,8 @@ class Tarefas:
         ocupada = [t for t in self.todas() if t["situacao"] == "rodando"]
         if ocupada:
             raise TarefaRecusada(f"A tarefa #{ocupada[0]['numero']} ainda está rodando. Uma por vez.")
+        if tarefa.get("tipo") == "base":
+            return self._iniciar_base(tarefa)
         repositorio = self.repositorios[tarefa["projeto"]]
         pasta = self.pasta / f"{tarefa['numero']}-{tarefa['projeto']}"
         self.git(["fetch", "--quiet", "origin"], repositorio)
@@ -214,7 +258,26 @@ class Tarefas:
         self._gravar(tarefa)
         return {"numero": tarefa["numero"], "branch": tarefa["branch"]}
 
+    def _iniciar_base(self, tarefa) -> dict:
+        copia = self.pasta / f"base-{tarefa['numero']}-copia"
+        shutil.copytree(self.base, copia, symlinks=True)
+        os.chmod(copia, 0o700)
+        tarefa.update(situacao="rodando", iniciada_em=self.relogio().isoformat(),
+                      copia=str(copia))
+        tarefa["pid"] = self.iniciar_processo(tarefa, self.base)
+        self._gravar(tarefa)
+        return {"numero": tarefa["numero"], "copia": str(copia)}
+
     def comando(self, tarefa) -> list:
+        if tarefa.get("tipo") == "base":
+            from .orcamento import BRASILIA
+            data = self.relogio().astimezone(BRASILIA).strftime("%d/%m/%Y")
+            return [self.claude, "-p", tarefa["pedido"],
+                    "--output-format", "json", "--permission-mode", "dontAsk",
+                    "--permission-prompts", "none", "--no-session-persistence",
+                    "--max-budget-usd", f"{min(self.orcamento_usd, 1.0):g}",
+                    "--append-system-prompt", REGRAS_DA_BASE.format(data=data),
+                    "--allowedTools", *BASE_LIBERADAS, "--disallowedTools", *BASE_NEGADAS]
         pedido = f"{tarefa.get('titulo', '')}\n\n{tarefa['pedido']}".strip()
         return [self.claude, "-p", pedido,
                 "--output-format", "json", "--permission-mode", "dontAsk",
@@ -286,7 +349,10 @@ class Tarefas:
             detalhes.append(f"{negadas} comando(s) negado(s) pelas travas")
         if detalhes:
             linhas.append("(" + "; ".join(detalhes) + ")")
-        linhas.append("Merge, release e deploy ficam com você.")
+        if tarefa.get("tipo") == "base":
+            linhas.append(f"Cópia de antes, para desfazer: {tarefa.get('copia', '')}")
+        else:
+            linhas.append("Merge, release e deploy ficam com você.")
         return tarefa, "\n".join(linhas)
 
     def situacao(self) -> list:

@@ -233,6 +233,17 @@ CATALOGO = [
         ["numero"],
     ),
     _ferramenta(
+        "propor_atualizacao_base",
+        "Quando Nicolas comunicar uma decisão que muda a base de conhecimento (preço aprovado, "
+        "cliente quitou, importação fechada), proponha a atualização: diga o arquivo e a "
+        "mudança, de quanto para quanto. Mostre o resumo exatamente como vier; a mudança só é "
+        "aplicada (com iniciar_tarefa) depois que ele aprovar numa mensagem nova. Você nunca "
+        "edita a base diretamente.",
+        {"arquivo": {"type": "string", "description": "ex: catalogo-e-precos.md"},
+         "mudanca": {"type": "string", "description": "A decisão de Nicolas, com valores e itens"}},
+        ["arquivo", "mudanca"],
+    ),
+    _ferramenta(
         "situacao_tarefas",
         "Lista as últimas tarefas repassadas ao Claude Code, com situação, branch e PR.",
         {},
@@ -512,6 +523,13 @@ class Ferramentas:
                                                      argumentos.get("pedido"))
         resultado["instrucao"] = ("Mostre este resumo a Nicolas exatamente como está e espere ele "
                                   "aprovar numa mensagem nova. Não inicie agora.")
+        return resultado
+
+    def _propor_atualizacao_base(self, argumentos):
+        resultado = self._tarefas_ou_erro().preparar_base(argumentos.get("arquivo"),
+                                                          argumentos.get("mudanca"))
+        resultado["instrucao"] = ("Mostre este resumo a Nicolas exatamente como está e espere ele "
+                                  "aprovar numa mensagem nova. Não aplique agora.")
         return resultado
 
     def _iniciar_tarefa(self, argumentos):
