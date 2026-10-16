@@ -1,0 +1,20 @@
+[Unit]
+Description=Ponte do WhatsApp (número principal de Nicolas, só leitura pelo Zeus)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# A ponte grava store/ relativo ao diretório de trabalho: um diretório por número.
+WorkingDirectory=%h/pontes/principal
+Environment=WHATSAPP_BRIDGE_PORT=8080
+ExecStart=%h/whatsapp-mcp/whatsapp-bridge/whatsapp-bridge
+StandardInput=null
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
