@@ -2,6 +2,8 @@
 
 Issue: #48. Meta: #46. Este roteiro é para a sessão do Claude Code aberta **no próprio X99**. Os passos marcados **Nicolas** envolvem celular, login ou credencial, e nenhum agente faz esses passos.
 
+O contexto do trabalho (quem é o Nicolas, os projetos e as regras) não está neste repositório, que é público. Ele chega ao X99 em `~/x99-transferencia/CONTEXTO_X99.md`, levado do PC por script. Leia esse arquivo antes deste roteiro.
+
 Ao fim do roteiro, o X99 roda sozinho, sem o PC ligado:
 
 | Serviço | O que é | Porta |
@@ -116,7 +118,7 @@ systemctl --user restart zeus.service
 
 1. **Nicolas:** instale o Claude Code pelo instalador oficial e faça login com a sua conta.
 2. **Nicolas:** rode `gh auth login`.
-3. **Claude:** configure a identidade do git e clone `zeus`, `letorneadora` e `dashboardcpa` em `~/trabalho/`. Esses clones ficam separados do `~/zeus`, que é o clone do serviço.
+3. **Claude:** configure a identidade do git e clone os projetos nos mesmos caminhos do PC: `~/Documents/zeus`, `~/Documents/catalogo-le/letorneadora` e `~/Documents/CPA/dashboard`. Esses clones ficam separados do `~/zeus`, que é o clone do serviço.
 4. **Nicolas:** coloque no X99 só as credenciais de deploy que as tarefas de código vão usar, como Vercel e o release da dash.
 5. **Claude:** registre o MCP de leitura do WhatsApp, apontando para a ponte do número principal:
 
@@ -127,7 +129,7 @@ claude mcp add --scope user whatsapp -- uv --directory ~/whatsapp-mcp/whatsapp-m
 6. **Claude:** confira que o modo sem terminal funciona:
 
 ```bash
-cd ~/trabalho/zeus && claude -p "responda só: ok"
+cd ~/Documents/zeus && claude -p "responda só: ok"
 ```
 
 ## 7. Evidência para fechar a #48
