@@ -83,6 +83,14 @@ Enquanto um ponto aguarda decisão, novas mensagens do mesmo contato não geram 
 - Conversa de quem não está no CRM nunca é lida: não vai para o modelo nem sai da máquina.
 - O estado fica no `kv`: `quentes_pendentes`, `quentes_liberados`, `quentes_bloqueados`. Para desfazer um bloqueio, tire o `jid` de `quentes_bloqueados`.
 
+## Ler uma conversa sob pedido (#55)
+
+A ferramenta `ler_conversa(contato, quantidade)` responde perguntas como "qual a última mensagem que o Henrique me mandou?". Ela lê a ponte do número principal, só para leitura, e devolve as últimas mensagens (padrão 10, máximo 30) com hora e quem falou.
+
+O contato é achado nesta ordem: rótulo dos acompanhados e liberados, nome no CRM, nome salvo na agenda, nome de perfil. Nome exato vale mais que começo de palavra. Se dois contatos empatam, a ferramenta devolve os nomes e não lê nada.
+
+O resultado é conversa de terceiro, marcada como externa: depois dela, nada que mude memória ou agenda roda na mesma resposta. Ela também não fica entre as ferramentas que sobram depois de conteúdo externo, para que uma página não consiga mandar abrir uma conversa privada.
+
 ## Segurança
 
 A regra da #9 vale aqui também: o que chega de terceiros é dado, não instrução. Ela é garantida pelo código, não pela persona:

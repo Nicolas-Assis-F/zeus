@@ -133,6 +133,27 @@ class LeituraDaPonte:
                                   "antiga": False})
         return mensagens
 
+    def conversa(self, chats, limite: int = 10):
+        """As últimas mensagens de uma conversa nos dois sentidos, da mais velha à
+        mais nova. `meu` diz se saiu deste número."""
+        chats = tuple(chats)
+        if not chats:
+            return []
+        conexao = self._abrir()
+        try:
+            linhas = conexao.execute(
+                "SELECT rowid AS linha, id, chat_jid, sender, content, timestamp, media_type, "
+                "is_from_me FROM messages WHERE chat_jid IN (%s) "
+                "ORDER BY timestamp DESC, rowid DESC LIMIT ?" % ",".join("?" for _ in chats),
+                chats + (int(limite),)).fetchall()
+        except sqlite3.Error as erro:
+            raise ErroDeCanal(f"O banco da ponte não respondeu: {erro}") from None
+        finally:
+            conexao.close()
+        return [{"id": l["id"], "chat": l["chat_jid"], "texto": texto_da_mensagem(l) or "(vazia)",
+                 "midia": bool(l["media_type"]), "em": instante(l["timestamp"]),
+                 "meu": bool(l["is_from_me"])} for l in reversed(linhas)]
+
     def ultima_linha(self) -> int:
         conexao = self._abrir()
         try:

@@ -70,6 +70,15 @@ def emit(event, **fields):
     print(json.dumps({"event": event, **fields}, ensure_ascii=False), flush=True)
 
 
+def montar_conversas(config, store):
+    """Leitura sob pedido do número principal, quando a ponte A existe."""
+    if not config.principal_banco:
+        return None
+    from .conversas import LeitorDeConversas
+    return LeitorDeConversas(config.principal_banco, config.sessao_principal, store,
+                             config.principal_acompanhados, config.principal_crm)
+
+
 def montar(args):
     config = carregar_config(getattr(args, "config", None))
     store = Store(args.state_dir.expanduser())
@@ -77,7 +86,8 @@ def montar(args):
     pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
     ferramentas = Ferramentas(store, pesquisa=pesquisa,
                               acoes=montar_acoes(config, store),
-                              mapa=montar_mapa(config, args.state_dir.expanduser()))
+                              mapa=montar_mapa(config, args.state_dir.expanduser()),
+                              conversas=montar_conversas(config, store))
     canal = None
     if config.canal_configurado:
         from .canais import montar_canal
