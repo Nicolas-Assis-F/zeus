@@ -28,7 +28,7 @@ from .ferramentas import Ferramentas
 from .execucao import (CaixaDeEntrada, FalaEmSegundoPlano, RecepcaoTelegram,
                        InstanciaUnica, EstadoOperacao, SupervisorPresenca)
 from .entregas import Entregas
-from .llm import ErroDeModelo, criar_provedor
+from .llm import ErroDeModelo, contabilizar, criar_provedor, uso_da_chave
 from .nucleo import Zeus
 from .persona import Persona
 from .pesquisa import Pesquisa
@@ -195,6 +195,8 @@ def ligar_modelo(zeus, config):
     """Verificação obrigatória antes de usar o modelo em qualquer conversa."""
     provedor = criar_provedor(config)
     servido = provedor.verificar()
+    # Cada chamada paga vai para o log: é assim que se mede um dia de uso.
+    contabilizar(provedor, lambda uso: emit("uso_modelo", **uso))
     zeus.provedor = provedor
     return servido
 
@@ -217,6 +219,7 @@ def main():
     conversas.add_argument("--limite", type=int, default=30)
 
     commands.add_parser("run", help="Manter o Zeus em execução")
+    commands.add_parser("uso", help="Quanto a chave do OpenRouter gastou hoje, na semana e no mês")
     commands.add_parser("agenda", help="Listar perguntas e lembretes pendentes")
     commands.add_parser("entregas", help="Mostrar estados de saída e entradas incertas")
     backup = commands.add_parser("backup", help="Criar cópia consistente sem sobrescrever")
@@ -345,6 +348,8 @@ def main():
             banco = config.principal_banco if args.principal else config.whatsapp_banco
             emit("whatsapp", ponte="principal" if args.principal else "zeus",
                  conversas=LeituraDaPonte(banco).conversas(args.limite))
+        elif args.command == "uso":
+            emit("uso_openrouter", **uso_da_chave(config))
         elif args.command == "entregas":
             fila = Entregas(store)
             emit('entregas', saidas=fila.listar(), entradas=fila.entradas())
@@ -734,7 +739,7 @@ def _executar(zeus, store, config):
             agenda=store.agenda_pendente(), agora=datetime.now(timezone.utc),
             capacidades=zeus.capacidades)
         mensagens = [{"role": "system", "content": sistema}]
-        mensagens += zeus.persona.exemplos()
+        mensagens += zeus.persona.exemplos_para(config.provedor)
         mensagens.append({"role": "user", "content": pedido})
         resposta = zeus.provedor.conversar(mensagens, None, config.temperatura_conversa)
         texto = limpar_resposta(resposta.texto)

@@ -7,7 +7,9 @@ from pathlib import Path
 from apoio import ProvedorFalso, Relogio, config_de_teste, em, transporte_roteirizado
 from zeus.canais import CanalMemoria
 from zeus.ferramentas import Ferramentas
-from zeus.llm import ErroDeModelo, ProvedorHibrido, ProvedorOllama, Resposta
+from zeus.config import Config
+from zeus.llm import (ErroDeModelo, ProvedorHibrido, ProvedorOllama, ProvedorOpenRouter, Resposta,
+                      contabilizar, criar_provedor, uso_da_chave)
 from zeus.nucleo import Zeus
 from zeus.persona import Persona
 from zeus.store import Store
@@ -123,3 +125,75 @@ class Hibrido(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModeloPorPapel(unittest.TestCase):
+    def config(self, **ajustes):
+        base = dict(provedor="openrouter", modelo="anthropic/claude-sonnet-5.5",
+                    openrouter_chave="teste")
+        base.update(ajustes)
+        return Config(**base)
+
+    def test_um_modelo_so_e_uma_chamada(self):
+        provedor = criar_provedor(self.config())
+        self.assertIsInstance(provedor, ProvedorOpenRouter)
+        self.assertIsInstance(criar_provedor(self.config(
+            modelo_ferramentas="anthropic/claude-sonnet-5.5")), ProvedorOpenRouter)
+
+    def test_modelo_de_ferramentas_diferente_decide(self):
+        transporte = transporte_roteirizado([("chat/completions", {
+            "model": "anthropic/claude-haiku-5.5",
+            "choices": [{"message": {"content": "", "tool_calls": [
+                {"id": "c1", "function": {"name": "consultar_fato", "arguments": "{}"}}]}}]})])
+        provedor = criar_provedor(self.config(modelo_ferramentas="anthropic/claude-haiku-5.5"),
+                                  transporte)
+        resposta = provedor.conversar([{"role": "user", "content": "oi"}], [{"type": "function"}])
+        self.assertEqual(resposta.chamadas[0]["nome"], "consultar_fato")
+        self.assertEqual(transporte.chamadas[0]["corpo"]["model"], "anthropic/claude-haiku-5.5")
+
+    def test_uso_de_cada_chamada_e_contabilizado(self):
+        transporte = transporte_roteirizado([("chat/completions", {
+            "model": "anthropic/claude-sonnet-5.5",
+            "choices": [{"message": {"content": "Olá."}}],
+            "usage": {"prompt_tokens": 1200, "completion_tokens": 40, "cost": 0.0028}})])
+        provedor = criar_provedor(self.config(), transporte)
+        usos = []
+        contabilizar(provedor, usos.append)
+        provedor.conversar([{"role": "user", "content": "oi"}])
+        self.assertEqual(transporte.chamadas[0]["corpo"]["usage"], {"include": True})
+        self.assertEqual(usos, [{"modelo": "anthropic/claude-sonnet-5.5", "entrada": 1200,
+                                 "saida": 40, "custo": 0.0028}])
+
+    def test_contabilidade_com_defeito_nao_derruba_a_conversa(self):
+        transporte = transporte_roteirizado([("chat/completions", {
+            "model": "anthropic/claude-sonnet-5.5", "choices": [{"message": {"content": "Olá."}}],
+            "usage": {"prompt_tokens": 1}})])
+        provedor = criar_provedor(self.config(), transporte)
+
+        def quebra(uso):
+            raise RuntimeError("log fora do ar")
+
+        contabilizar(provedor, quebra)
+        self.assertEqual(provedor.conversar([{"role": "user", "content": "oi"}]).texto, "Olá.")
+
+    def test_uso_da_chave(self):
+        transporte = transporte_roteirizado([("/key", {"data": {
+            "usage": 3.5, "usage_daily": 0.42, "usage_weekly": 1.1, "usage_monthly": 3.5}})])
+        self.assertEqual(uso_da_chave(self.config(), transporte),
+                         {"hoje": 0.42, "semana": 1.1, "mes": 3.5, "total": 3.5})
+
+
+class ExemplosDaPersona(unittest.TestCase):
+    def test_modelo_local_aprende_por_turno(self):
+        persona = Persona.carregar("config/persona.md")
+        self.assertEqual(persona.exemplos_para("ollama"), persona.exemplos())
+        self.assertEqual(persona.exemplos_para("hibrido"), persona.exemplos())
+
+    def test_modelo_grande_recebe_exemplos_ditos_ficticios(self):
+        persona = Persona.carregar("config/persona.md")
+        mensagens = persona.exemplos_para("openrouter")
+        self.assertEqual([m["role"] for m in mensagens], ["system"])
+        self.assertIn("fictícios", mensagens[0]["content"])
+        self.assertIn("14h32", mensagens[0]["content"])
+        # Nenhum turno de exemplo se passa por conversa.
+        self.assertNotIn("assistant", [m["role"] for m in mensagens])

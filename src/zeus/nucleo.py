@@ -68,7 +68,7 @@ class Zeus:
         # Ordem pensada para o cache do servidor e para o tom: persona e
         # exemplos primeiro, porque não mudam entre turnos; conversa depois.
         mensagens = [{"role": "system", "content": self.persona.instrucao()}]
-        mensagens.extend(self.persona.exemplos())
+        mensagens.extend(self.persona.exemplos_para(getattr(self.config, "provedor", "ollama")))
         for turno in self.store.turnos(self.config.turnos_de_conversa):
             papel = "assistant" if turno["papel"] == "zeus" else "user"
             mensagens.append({"role": papel, "content": turno["texto"]})

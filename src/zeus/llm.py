@@ -270,9 +270,23 @@ class ProvedorOpenRouter:
         self.transporte = transporte or transporte_http
         self.transporte_de_fluxo = transporte_sse
         self.timeout = timeout
+        # Quem quiser saber o gasto de cada chamada pendura uma função aqui.
+        self.ao_usar = None
 
     def _cabecalhos(self):
         return {"Authorization": f"Bearer {self.chave}"}
+
+    def _registrar_uso(self, uso, servido):
+        if not self.ao_usar or not isinstance(uso, dict):
+            return
+        try:
+            self.ao_usar({"modelo": servido or self.modelo,
+                          "entrada": uso.get("prompt_tokens"),
+                          "saida": uso.get("completion_tokens"),
+                          "custo": uso.get("cost")})
+        except Exception:
+            # Contabilidade não derruba a conversa.
+            pass
 
     def verificar(self) -> str:
         dados = self.transporte("GET", f"{self.url}/models", None, self._cabecalhos(), self.timeout)
@@ -282,7 +296,8 @@ class ProvedorOpenRouter:
         return self.modelo
 
     def conversar(self, mensagens, ferramentas=None, temperatura=0.0) -> Resposta:
-        corpo = {"model": self.modelo, "messages": mensagens, "temperature": temperatura}
+        corpo = {"model": self.modelo, "messages": mensagens, "temperature": temperatura,
+                 "usage": {"include": True}}
         if ferramentas:
             corpo["tools"] = ferramentas
         dados = self.transporte("POST", f"{self.url}/chat/completions", corpo,
@@ -292,6 +307,7 @@ class ProvedorOpenRouter:
             raise ErroDeModelo(
                 f"Pedi {self.modelo} e a resposta veio marcada como {servido or 'desconhecido'}."
             )
+        self._registrar_uso(dados.get("usage"), servido)
         escolhas = dados.get("choices") or [{}]
         mensagem = escolhas[0].get("message", {}) or {}
         chamadas = []
@@ -311,14 +327,16 @@ class ProvedorOpenRouter:
     def conversar_em_fluxo(self, mensagens, ferramentas=None, temperatura=0.0,
                            ao_receber=None) -> Resposta:
         corpo = {"model": self.modelo, "messages": mensagens,
-                 "temperature": temperatura, "stream": True}
+                 "temperature": temperatura, "stream": True, "usage": {"include": True}}
         if ferramentas:
             corpo["tools"] = ferramentas
-        partes, servido, chamadas = [], "", {}
+        partes, servido, chamadas, uso = [], "", {}, None
         concluido = False
         for pacote in self.transporte_de_fluxo("POST", f"{self.url}/chat/completions",
                                                corpo, self._cabecalhos(), self.timeout):
             servido = _modelo_do_pacote(self.modelo, pacote, servido)
+            # O uso chega no último pacote, às vezes depois do finish_reason.
+            uso = pacote.get("usage") or uso
             for escolha in pacote.get("choices") or []:
                 if escolha.get("index", 0) != 0:
                     continue
@@ -343,6 +361,7 @@ class ProvedorOpenRouter:
                     concluido = True
         if not concluido:
             raise ErroDeModelo("O fluxo terminou antes da confirmação de conclusão.")
+        self._registrar_uso(uso, servido)
         return Resposta("".join(partes), _normalizar_chamadas(
             [chamadas[i] for i in sorted(chamadas)]), servido)
 
@@ -441,8 +460,16 @@ def criar_provedor(config, transporte=None):
     if config.provedor == "ollama":
         return _ollama(config, transporte)
     if config.provedor == "openrouter":
-        return ProvedorOpenRouter(config.openrouter_url, config.modelo,
-                                  config.openrouter_chave, transporte)
+        conversa = ProvedorOpenRouter(config.openrouter_url, config.modelo,
+                                      config.openrouter_chave, transporte)
+        decide = getattr(config, "modelo_ferramentas", "")
+        if decide and decide != config.modelo:
+            # Mesmo desenho do híbrido, os dois lados no OpenRouter: um modelo
+            # escolhe a ferramenta, outro escreve a resposta.
+            return ProvedorHibrido(ProvedorOpenRouter(config.openrouter_url, decide,
+                                                      config.openrouter_chave, transporte),
+                                   conversa)
+        return conversa
     if config.provedor == "hibrido":
         if not config.modelo_conversa:
             raise ErroDeModelo("O híbrido precisa de modelo_conversa configurado.")
@@ -451,3 +478,22 @@ def criar_provedor(config, transporte=None):
                                     config.openrouter_chave, transporte)
         return ProvedorHibrido(local, remoto)
     raise ErroDeModelo(f"Provedor desconhecido: {config.provedor}")
+
+
+def contabilizar(provedor, funcao):
+    """Pendura `funcao(uso)` em todo provedor do OpenRouter dentro deste."""
+    for parte in (provedor, getattr(provedor, "local", None), getattr(provedor, "remoto", None)):
+        if isinstance(parte, ProvedorOpenRouter):
+            parte.ao_usar = funcao
+
+
+def uso_da_chave(config, transporte=None) -> dict:
+    """Quanto a chave do OpenRouter gastou, em dólares, segundo o próprio OpenRouter."""
+    if not config.openrouter_chave:
+        raise ErroDeModelo("OpenRouter exige uma chave configurada fora do Git.")
+    transporte = transporte or transporte_http
+    dados = transporte("GET", f"{config.openrouter_url.rstrip('/')}/key", None,
+                       {"Authorization": f"Bearer {config.openrouter_chave}"}, TEMPO_LIMITE)
+    dados = dados.get("data") or {}
+    return {campo: dados.get(f"usage{sufixo}") for campo, sufixo in
+            (("hoje", "_daily"), ("semana", "_weekly"), ("mes", "_monthly"), ("total", ""))}
