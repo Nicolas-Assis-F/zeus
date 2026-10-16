@@ -120,6 +120,13 @@ class Config:
     # vazio, usa a que fica ao lado de `principal_banco`. Os níveis listados
     # viram aviso no grupo, e Nicolas libera ou bloqueia o contato.
     principal_crm: str = ""
+    principal_ponte_url: str = "http://127.0.0.1:8080"
+    # Mídia do WhatsApp (#60): teto antes de baixar, duração máxima de áudio
+    # (o microfone da HUD tem o dele) e threads da transcrição. A visão usa
+    # `modelo_visao`, ou o próprio modelo do OpenRouter.
+    midia_max_mb: int = 25
+    midia_audio_segundos: int = 900
+    midia_threads: int = 8
     # Base de conhecimento (preços, importação, clientes), fora de qualquer
     # repositório. Escrita só por Nicolas e pelo Claude: é fonte confiável.
     base_conhecimento: str = "~/.local/share/zeus/conhecimento"

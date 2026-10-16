@@ -91,6 +91,24 @@ O contato é achado nesta ordem: rótulo dos acompanhados e liberados, nome no C
 
 O resultado é conversa de terceiro, marcada como externa: depois dela, nada que mude memória ou agenda roda na mesma resposta. Ela também não fica entre as ferramentas que sobram depois de conteúdo externo, para que uma página não consiga mandar abrir uma conversa privada.
 
+## Áudio, PDF, foto e vídeo (#60)
+
+A mídia é baixada pela própria ponte (`/api/download`) e lida em `src/zeus/midia.py`:
+
+- **Áudio:** o ffmpeg decodifica para WAV 16 kHz mono, e o faster-whisper transcreve. O limite é `midia_audio_segundos` (padrão 900); o microfone da HUD tem o dele.
+- **PDF:** `pdftotext -layout`, até 15 páginas. XML e texto (NF-e) são lidos direto.
+- **Foto:** o `modelo_visao` (ou o próprio modelo do OpenRouter) descreve e transcreve o texto visível.
+- **Vídeo:** a trilha de áudio é transcrita e três quadros são descritos.
+- Arquivo acima de `midia_max_mb` (padrão 25) nem é baixado.
+- O resultado fica em cache no estado do Zeus (`midia/`, 600), para a mesma mensagem não ser transcrita de novo.
+
+Onde a mídia aparece:
+
+- **Grupo:** o áudio de Nicolas é transcrito e vira o pedido, porque é a voz dele. Documento, foto e vídeo entram como marcador com o id, e o Zeus lê com `ler_midia`.
+- **`ler_midia(mensagem, origem)`:** o resultado é **externo**, porque uma NF pode trazer instrução no rodapé. Depois dele, nada que mude memória ou agenda roda na mesma resposta, e a ferramenta não fica entre as que sobram depois de conteúdo de fora.
+- **Vigia:** o áudio do contato acompanhado vem transcrito no aviso. É dado de terceiro, só no aviso e no rascunho sem ferramentas.
+- **`ler_conversa`:** os 4 áudios mais recentes vêm transcritos; as outras mídias vêm com o id para `ler_midia`.
+
 ## Segurança
 
 A regra da #9 vale aqui também: o que chega de terceiros é dado, não instrução. Ela é garantida pelo código, não pela persona:

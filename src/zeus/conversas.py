@@ -28,6 +28,7 @@ from .quentes import Crm
 PADRAO = 10
 MAXIMO = 30
 MAXIMO_DE_CANDIDATOS = 8
+MAXIMO_DE_AUDIOS = 4
 BRASILIA = timezone(timedelta(hours=-3))
 
 
@@ -50,12 +51,14 @@ def casa(busca: str, nome: str) -> bool:
 
 
 class LeitorDeConversas:
-    def __init__(self, banco: str, sessao: str, store, acompanhados_config=(), crm: str = ""):
+    def __init__(self, banco: str, sessao: str, store, acompanhados_config=(), crm: str = "",
+                 midia=None):
         self.leitura = LeituraDaPonte(banco)
         self.sessao = sessao
         self.store = store
         self.acompanhados = acompanhados(acompanhados_config)
         self.crm = Crm(crm) if crm else None
+        self.midia = midia
 
     # ------------------------------------------------------------- sessão
     def _sessao(self, sql, parametros=()):
@@ -144,6 +147,14 @@ class LeitorDeConversas:
             quantidade = PADRAO
         jid, nome = self.achar(busca)
         mensagens = self.leitura.conversa(self._jids(jid), quantidade)
+        if self.midia is not None:
+            # Só os áudios mais recentes são transcritos aqui: cada um leva
+            # segundos. Os outros, e toda outra mídia, levam o id para ler_midia.
+            from .midia import marcador
+            audios = [m for m in mensagens if m.get("tipo_midia") == "audio"][-MAXIMO_DE_AUDIOS:]
+            mensagens = [dict(m, texto=self.midia.transcricao("principal", m) if m in audios
+                              else marcador(m, "principal")) if m["midia"] else m
+                         for m in mensagens]
         linhas = [{"quando": m["em"].astimezone(BRASILIA).strftime("%d/%m %H:%M"),
                    "quem": "Nicolas" if m["meu"] else nome,
                    "texto": m["texto"]} for m in mensagens]
