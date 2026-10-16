@@ -729,7 +729,7 @@ def _executar(zeus, store, config):
             agenda=store.agenda_pendente(), agora=datetime.now(timezone.utc),
             capacidades=zeus.capacidades)
         mensagens = [{"role": "system", "content": sistema}]
-        mensagens += zeus.persona.exemplos()
+        mensagens += zeus.persona.exemplos_para(config.provedor)
         mensagens.append({"role": "user", "content": pedido})
         resposta = zeus.provedor.conversar(mensagens, None, config.temperatura_conversa)
         texto = limpar_resposta(resposta.texto)

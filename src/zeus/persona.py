@@ -77,6 +77,27 @@ class Persona:
             mensagens.pop()
         return mensagens
 
+    def exemplos_para(self, provedor: str):
+        """Os exemplos no formato que cada modelo aproveita sem se enganar.
+
+        O 8B local aprende tom por turno de verdade. Um modelo grande lê esses
+        mesmos turnos como conversa que aconteceu: no X99 o Sonnet passou a
+        "corrigir" o lembrete das 14h32, que só existe no exemplo. Para ele os
+        exemplos vão no sistema, ditos fictícios."""
+        if provedor in ("ollama", "hibrido"):
+            return self.exemplos()
+        linhas = []
+        for mensagem in self.exemplos():
+            quem = "Zeus" if mensagem["role"] == "assistant" else "Nicolas"
+            linhas.append(f"- {quem}: {mensagem['content']}")
+        if not linhas:
+            return []
+        return [{"role": "system", "content": (
+            "Exemplos de tom. São fictícios: não aconteceram, não são conversa com Nicolas "
+            "e não dizem nada sobre a agenda, a memória ou o que você fez. Horários, preços, "
+            "arquivos e pedidos que aparecem neles não existem. Use só como referência de "
+            "estilo.\n\n" + "\n".join(linhas))}]
+
     def instrucao(self) -> str:
         """O que o modelo lê como instrução, sem o que é nota para humano.
 

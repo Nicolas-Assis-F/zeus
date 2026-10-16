@@ -181,3 +181,19 @@ class ModeloPorPapel(unittest.TestCase):
             "usage": 3.5, "usage_daily": 0.42, "usage_weekly": 1.1, "usage_monthly": 3.5}})])
         self.assertEqual(uso_da_chave(self.config(), transporte),
                          {"hoje": 0.42, "semana": 1.1, "mes": 3.5, "total": 3.5})
+
+
+class ExemplosDaPersona(unittest.TestCase):
+    def test_modelo_local_aprende_por_turno(self):
+        persona = Persona.carregar("config/persona.md")
+        self.assertEqual(persona.exemplos_para("ollama"), persona.exemplos())
+        self.assertEqual(persona.exemplos_para("hibrido"), persona.exemplos())
+
+    def test_modelo_grande_recebe_exemplos_ditos_ficticios(self):
+        persona = Persona.carregar("config/persona.md")
+        mensagens = persona.exemplos_para("openrouter")
+        self.assertEqual([m["role"] for m in mensagens], ["system"])
+        self.assertIn("fictícios", mensagens[0]["content"])
+        self.assertIn("14h32", mensagens[0]["content"])
+        # Nenhum turno de exemplo se passa por conversa.
+        self.assertNotIn("assistant", [m["role"] for m in mensagens])
