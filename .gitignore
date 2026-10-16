@@ -12,3 +12,4 @@ data/
 config/config.json
 .config/
 *.patch
+!deploy/whatsapp/whatsapp-mcp.patch
