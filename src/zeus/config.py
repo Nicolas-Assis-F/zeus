@@ -25,6 +25,12 @@ class Config:
     telegram_token: str = ""
     telegram_chat_id: str = ""
     modelo_conversa: str = ""
+    # Modelo por papel no OpenRouter. `modelo` conduz a conversa; vazio aqui é
+    # o mesmo modelo. Um `modelo_ferramentas` diferente decide as ferramentas
+    # e custa uma chamada a mais quando não há ferramenta a usar. A visão
+    # descreve foto e vídeo recebidos.
+    modelo_ferramentas: str = ""
+    modelo_visao: str = ""
     keep_alive: str = "30m"
     limite_de_resposta: int = 320
     # Ligada por padrão. Desligada, o Zeus não sabe nada do mundo depois do

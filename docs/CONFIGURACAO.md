@@ -23,6 +23,8 @@ sobre o arquivo, o que permite testar um modelo sem editar configuração.
 | --- | --- |
 | `provedor` | `ollama` (local), `openrouter` (remoto) ou `hibrido` |
 | `modelo_conversa` | No híbrido, o modelo remoto que conduz a conversa |
+| `modelo_ferramentas` | No `openrouter`, outro modelo para escolher a ferramenta. Vazio é o próprio `modelo` |
+| `modelo_visao` | Modelo que descreve foto e vídeo recebidos. Vazio é o próprio `modelo` |
 | `modelo` | Nome exato do modelo. É verificado antes de cada execução |
 | `ollama_url` | Endereço do Ollama, normalmente `http://127.0.0.1:11434` |
 | `openrouter_chave` | Chave do OpenRouter, quando o provedor for remoto |
@@ -105,6 +107,25 @@ local decide e usa ferramenta a temperatura zero, o remoto conduz a conversa.
 Memória, agenda e decisão continuam em casa. O que sai é o texto da conversa, e
 só porque essa escolha foi feita de propósito. Nenhum áudio e nenhuma imagem
 são enviados por consequência disso.
+
+## Tudo no OpenRouter, modelo por papel
+
+Com `provedor: "openrouter"`, o mesmo modelo escolhe a ferramenta e escreve a
+resposta, numa chamada só:
+
+```json
+"provedor": "openrouter",
+"modelo": "anthropic/claude-sonnet-5.5",
+"openrouter_chave": "..."
+```
+
+`modelo_ferramentas` diferente de `modelo` reparte o trabalho como no híbrido,
+com os dois lados remotos. Isso custa uma chamada a mais nas respostas sem
+ferramenta.
+
+Cada chamada paga sai no log como `uso_modelo`, com tokens de entrada, saída e
+custo em dólares. `./zeus uso` mostra o gasto da chave hoje, na semana e no mês,
+segundo o próprio OpenRouter.
 
 ## Escolher modelo com número, não com impressão
 
