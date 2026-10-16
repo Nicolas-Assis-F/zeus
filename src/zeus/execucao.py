@@ -185,9 +185,9 @@ class SupervisorPresenca:
                 canal = self.criar_canal(store)
                 canais[canal.nome] = canal
             elif self.config.canal_configurado:
-                from .canais import CanalTelegram
-                canal = CanalTelegram(self.config.telegram_token, self.config.telegram_chat_id, store)
-                canais['telegram'] = canal
+                from .canais import montar_canal
+                canal = montar_canal(self.config, store)
+                canais[canal.nome] = canal
             if self.hud is not None:
                 # Entrega local significa disponível no histórico, não leitura humana.
                 class CanalHUD:
@@ -195,7 +195,8 @@ class SupervisorPresenca:
                     def enviar(self, texto):
                         return {'destino': 'historico_local'}
                 canais['hud'] = CanalHUD()
-            preferido = 'telegram' if 'telegram' in canais else next(iter(canais), 'hud')
+            conversa = [nome for nome in canais if nome != 'hud']
+            preferido = conversa[0] if conversa else next(iter(canais), 'hud')
             def sonda():
                 from .llm import transporte_http, _mesmo_modelo
                 dados = transporte_http('GET', self.config.ollama_url.rstrip('/') + '/api/tags', timeout=2)

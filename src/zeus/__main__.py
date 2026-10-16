@@ -1,7 +1,8 @@
 """Comandos do Zeus.
 
 Esta versão conversa com persona, guarda memória explícita, agenda perguntas e
-lembretes e entrega no Telegram quando o canal está configurado. Nada além
+lembretes e entrega no Telegram ou no WhatsApp quando o canal está configurado,
+e avisa o que chega no número principal de Nicolas. Nada além
 disso: sem visão, sem telefonia, sem dispositivo doméstico.
 """
 
@@ -79,9 +80,8 @@ def montar(args):
                               mapa=montar_mapa(config, args.state_dir.expanduser()))
     canal = None
     if config.canal_configurado:
-        from .canais import CanalTelegram
-        canal = CanalTelegram(config.telegram_token, config.telegram_chat_id, store,
-                              espera=config.espera_telegram)
+        from .canais import montar_canal
+        canal = montar_canal(config, store)
     return config, store, Zeus(store, None, persona, ferramentas, config, canal)
 
 
@@ -198,7 +198,13 @@ def main():
 
     verificacao = commands.add_parser("check", help="Verificar armazenamento, modelo e canal")
     verificacao.add_argument("--modelo", action="store_true", help="Também verificar o modelo")
-    verificacao.add_argument("--canal", action="store_true", help="Também verificar o Telegram")
+    verificacao.add_argument("--canal", action="store_true",
+                             help="Também verificar o canal de conversa (Telegram ou WhatsApp)")
+    conversas = commands.add_parser(
+        "whatsapp", help="Listar conversas de uma ponte, para preencher grupo e remetentes")
+    conversas.add_argument("--principal", action="store_true",
+                           help="Ler a ponte do número principal em vez da do Zeus")
+    conversas.add_argument("--limite", type=int, default=30)
 
     commands.add_parser("run", help="Manter o Zeus em execução")
     commands.add_parser("agenda", help="Listar perguntas e lembretes pendentes")
@@ -294,7 +300,11 @@ def main():
                     modelo = f"falhou: {erro}"
                     modelo_verificado = False
             if args.canal:
-                canal = "ausente" if zeus.canal is None else zeus.canal.verificar()
+                from .canais import ErroDeCanal
+                try:
+                    canal = "ausente" if zeus.canal is None else zeus.canal.verificar()
+                except ErroDeCanal as erro:
+                    canal = f"falhou: {erro}"
             voz = montar_voz(config)
             ouvidos = montar_ouvidos(config, args.state_dir.expanduser())
             emit("storage_check", version=__version__, storage=integrity,
@@ -305,6 +315,7 @@ def main():
                  contexto=diagnostico_do_contexto(config, persona_de(config)),
                  mapa=montar_mapa(config, args.state_dir.expanduser()).diagnostico(),
                  hud="configurada" if config.chave_hud else "sem chave definida",
+                 vigia_principal="configurado" if config.vigia_configurado else "desligado",
                  config=config.sem_segredos())
             return 0 if integrity == "ok" and modelo_verificado else 1
 
@@ -317,6 +328,11 @@ def main():
             return 0 if fact is not None else 1
         elif args.command == "forget":
             emit("forgotten", key=args.key, removed=store.forget(args.key))
+        elif args.command == "whatsapp":
+            from .canais.whatsapp import LeituraDaPonte
+            banco = config.principal_banco if args.principal else config.whatsapp_banco
+            emit("whatsapp", ponte="principal" if args.principal else "zeus",
+                 conversas=LeituraDaPonte(banco).conversas(args.limite))
         elif args.command == "entregas":
             fila = Entregas(store)
             emit('entregas', saidas=fila.listar(), entradas=fila.entradas())
@@ -626,6 +642,7 @@ def _executar(zeus, store, config):
 
     emit("started", version=__version__, modelo=servido, modelo_ok=modelo_ok,
          canal=(zeus.canal.nome if zeus.canal else "nenhum"),
+         vigia_principal="ligado" if (config.vigia_configurado and zeus.canal) else "desligado",
          voz=voz.diagnostico(), ouvidos=ouvidos.diagnostico(),
          hud=endereco or "desligada")
 
@@ -680,9 +697,8 @@ def _executar(zeus, store, config):
     recepcao = None
     if zeus.canal is not None:
         def criar_receptor():
-            from .canais import CanalTelegram
-            return CanalTelegram(config.telegram_token, config.telegram_chat_id,
-                                 Store(estado_local), espera=config.espera_telegram)
+            from .canais import montar_canal
+            return montar_canal(config, Store(estado_local))
         recepcao = RecepcaoTelegram(criar_receptor, recebidas_da_hud, stopped)
         recepcao.iniciar()
     # A saudação vem depois de tudo estar de pé: canal, HUD e agenda. Falar
@@ -725,6 +741,11 @@ def _executar(zeus, store, config):
         if fala and voz.disponivel():
             fala.falar(saudacao, 0)
 
+    vigia, proxima_vigia = None, 0.0
+    if config.vigia_configurado and zeus.canal is not None:
+        from .principal import VigiaPrincipal
+        vigia = VigiaPrincipal(config.principal_banco, config.principal_acompanhados, store)
+
     ultimo_batimento = 0.0
     while not stopped.is_set():
         try:
@@ -736,6 +757,19 @@ def _executar(zeus, store, config):
                 except ErroDeModelo:
                     operacao.atualizar('modelo', estado='indisponivel')
                 proxima_recuperacao = time.monotonic() + max(5, config.intervalo_recuperacao_modelo)
+            if vigia is not None and time.monotonic() >= proxima_vigia:
+                proxima_vigia = time.monotonic() + max(5, config.intervalo_principal)
+                from .principal import vigiar
+                try:
+                    avisos = vigiar(vigia, fila_de_saida, store, zeus.canal.nome,
+                                    zeus.provedor if modelo_ok else None)
+                except Exception as erro:
+                    # Ponte do número principal fora do ar não é falha da
+                    # conversa: o vigia tenta de novo na próxima rodada.
+                    avisos = []
+                    emit("vigia_indisponivel", detalhe=str(erro)[:200])
+                for aviso in avisos:
+                    anunciar("zeus", aviso)
             for _ in range(4):
                 try:
                     pedido = recebidas_da_hud.get_nowait()
@@ -749,15 +783,17 @@ def _executar(zeus, store, config):
                                     if zeus.ferramentas.pesquisa else False}
                 if pedido.get("tipo") == "telegram":
                     recebidas = pedido["mensagens"]
-                    chave_resposta = fila_de_saida.iniciar_resposta(recebidas)
+                    nome_do_canal = zeus.canal.nome
+                    chave_resposta = fila_de_saida.iniciar_resposta(recebidas, nome_do_canal)
                     try:
                         if chave_resposta is None:
                             continue
                         texto = "\n".join(m["texto"] for m in recebidas)
                         anunciar("nicolas", texto)
                         resposta = com_aviso_de_digitacao(
-                            zeus.canal, lambda: responder(texto, "telegram"))
-                        fila_de_saida.concluir_resposta(chave_resposta, resposta)
+                            zeus.canal, lambda: responder(texto, nome_do_canal))
+                        fila_de_saida.concluir_resposta(chave_resposta, resposta,
+                                                        canal=nome_do_canal)
                         anunciar("zeus", resposta)
                     except Exception:
                         if chave_resposta:

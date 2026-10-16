@@ -94,6 +94,7 @@ forense e não remove cópias de segurança anteriores.
 
 - [Instalação da máquina e acesso remoto](docs/INSTALACAO.md)
 - [Configuração de modelo e canal](docs/CONFIGURACAO.md)
+- [Zeus no WhatsApp](docs/WHATSAPP.md)
 - [Interface e voz](docs/INTERFACE_E_VOZ.md)
 - [Entregas, recuperação e percepção operacional](docs/ENTREGAS_E_PERCEPCAO.md)
 - [Pesquisa com procedência](docs/PESQUISA.md)

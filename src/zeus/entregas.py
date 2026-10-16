@@ -75,7 +75,9 @@ class Entregas:
             self.db.execute("UPDATE agenda SET situacao='concluida', concluida_em=? WHERE id=? AND situacao='pendente'",
                             (texto_de(agora), linha['referencia']))
         # Respostas já foram registradas pelo núcleo antes de entrar na fila.
-        if linha['tipo'] != 'resposta':
+        # Aviso com texto de terceiro nunca vira turno: no histórico, o modelo
+        # leria a fala de outra pessoa como se fosse dele (barreira da #9).
+        if linha['tipo'] not in ('resposta', 'aviso_terceiro'):
             self.db.execute("INSERT INTO turnos (em,canal,papel,texto) VALUES (?,?,'zeus',?)",
                             (texto_de(agora), 'saida', linha['texto']))
 
@@ -148,11 +150,11 @@ class Entregas:
             else:
                 raise ValueError('Ação inválida.')
 
-    def iniciar_resposta(self, mensagens):
+    def iniciar_resposta(self, mensagens, canal='telegram'):
         ids = sorted({int(m['id']) for m in mensagens})
         if not ids:
             return None
-        chave = 'resposta:telegram:' + ','.join(map(str, ids))
+        chave = f'resposta:{canal}:' + ','.join(map(str, ids))
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             linhas = [self.db.execute('SELECT situacao FROM entradas WHERE id=?', (i,)).fetchone() for i in ids]
@@ -162,9 +164,9 @@ class Entregas:
                 self.db.execute("UPDATE entradas SET situacao='processando', resposta=? WHERE id=?", (chave, i))
         return chave
 
-    def concluir_resposta(self, chave, texto, agora=None):
+    def concluir_resposta(self, chave, texto, agora=None, canal='telegram'):
         with self.db:
-            self._inserir(chave, 'telegram', texto, 'resposta', None, agora or agora_utc())
+            self._inserir(chave, canal, texto, 'resposta', None, agora or agora_utc())
             self.db.execute("UPDATE entradas SET situacao='respondida' WHERE resposta=? AND situacao='processando'", (chave,))
 
     def resposta_incerta(self, chave):
