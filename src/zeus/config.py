@@ -127,6 +127,9 @@ class Config:
     midia_max_mb: int = 25
     midia_audio_segundos: int = 900
     midia_threads: int = 8
+    # Orçamentos de teste (#62): PDF, registro e sequência, fora de qualquer git.
+    # Os preços vêm de precos.json, na base de conhecimento.
+    orcamentos_pasta: str = "~/.local/share/zeus/orcamentos"
     # Base de conhecimento (preços, importação, clientes), fora de qualquer
     # repositório. Escrita só por Nicolas e pelo Claude: é fonte confiável.
     base_conhecimento: str = "~/.local/share/zeus/conhecimento"

@@ -21,6 +21,7 @@ from threading import Event, Thread
 from . import __version__
 from .acoes import Acoes
 from .base import Base
+from .orcamento import Orcamentos
 from .mapa import Mapa
 from .saudacao import compor as compor_saudacao
 from .saudacao import identificador_de_boot
@@ -91,11 +92,15 @@ def montar(args):
                               acoes=montar_acoes(config, store),
                               mapa=montar_mapa(config, args.state_dir.expanduser()),
                               conversas=montar_conversas(config, store, midia),
-                              base=Base(config.base_conhecimento), midia=midia)
+                              base=Base(config.base_conhecimento), midia=midia,
+                              orcamentos=Orcamentos(config.orcamentos_pasta, os.path.join(
+                                  os.path.expanduser(config.base_conhecimento), "precos.json")))
     canal = None
     if config.canal_configurado:
         from .canais import montar_canal
         canal = montar_canal(config, store)
+        # Só o canal sabe mandar arquivo, e só para o grupo dele.
+        ferramentas.enviar_arquivo = getattr(canal, "enviar_arquivo", None)
     return config, store, Zeus(store, None, persona, ferramentas, config, canal)
 
 
@@ -339,6 +344,7 @@ def main():
                  vigia_principal="configurado" if config.vigia_configurado else "desligado",
                  pontos_quentes=diagnostico_dos_quentes(config),
                  base_conhecimento=Base(config.base_conhecimento).diagnostico(),
+                 orcamentos=zeus.ferramentas.orcamentos.diagnostico(),
                  config=config.sem_segredos())
             return 0 if integrity == "ok" and modelo_verificado else 1
 

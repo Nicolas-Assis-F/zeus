@@ -181,6 +181,40 @@ CATALOGO = [
         ["mensagem", "origem"],
     ),
     _ferramenta(
+        "preparar_orcamento",
+        "Prepara um orçamento de teste da LE e devolve o resumo para Nicolas confirmar. O "
+        "preço vem da base pelo SKU; não informe preço, a menos que Nicolas tenha dito o valor "
+        "de um item sem preço aprovado. Pergunte antes o que faltar do cliente (nome, razão "
+        "social, CPF/CNPJ, endereço, cidade, UF, CEP). Mostre o resumo exatamente como vier.",
+        {"cliente": {"type": "object", "properties": {
+            "nome": {"type": "string"}, "razao_social": {"type": "string"},
+            "doc": {"type": "string"}, "ie": {"type": "string"},
+            "endereco": {"type": "string"}, "cidade": {"type": "string"},
+            "uf": {"type": "string"}, "cep": {"type": "string"}, "email": {"type": "string"}}},
+         "itens": {"type": "array", "items": {"type": "object", "properties": {
+             "sku": {"type": "string", "description": "SKU do catálogo, ex: LE-CAB80"},
+             "quantidade": {"type": "integer"},
+             "variante": {"type": "string", "description": "Opcional, sai em negrito no item"},
+             "observacao": {"type": "string"},
+             "preco_informado_centavos": {"type": "integer",
+                                          "description": "Só se Nicolas disse o valor de um item sem preço aprovado"}},
+             "required": ["sku"]}},
+         "ref_cliente": {"type": "string"},
+         "codigo_cliente": {"type": "string", "description": "CU... oficial, se Nicolas souber"},
+         "pagamento_extenso": {"type": "string", "description": "ex: entrada e o restante na entrega do material"},
+         "termos_pagamento": {"type": "string", "description": "ex: Entrada + restante na entrega"},
+         "entrega": {"type": "string", "description": "Data ou prazo dito por Nicolas; senão A combinar"}},
+        ["cliente", "itens"],
+    ),
+    _ferramenta(
+        "gerar_orcamento",
+        "Gera o PDF de um orçamento já preparado e manda no grupo. Só depois que Nicolas "
+        "confirmou o resumo numa mensagem nova; nunca na mesma resposta em que preparou. "
+        "O PDF nunca vai para cliente.",
+        {"numero": {"type": "string", "description": "O número do resumo, ex: ZT2610-0001"}},
+        ["numero"],
+    ),
+    _ferramenta(
         "ler_conversa",
         "Lê as últimas mensagens de uma conversa do número principal de Nicolas, com hora e "
         "quem falou. Use quando ele perguntar o que alguém mandou ou disse. O contato é o nome "
@@ -206,7 +240,8 @@ class Ferramentas:
     NOMES_DE_LEITURA = NOMES_DE_LEITURA
 
     def __init__(self, store, relogio=None, pesquisa=None, acoes=None, mapa=None,
-                 conversas=None, base=None, midia=None):
+                 conversas=None, base=None, midia=None, orcamentos=None,
+                 enviar_arquivo=None):
         self.store = store
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
         self.pesquisa = pesquisa
@@ -215,6 +250,11 @@ class Ferramentas:
         self.conversas = conversas
         self.base = base
         self.midia = midia
+        self.orcamentos = orcamentos
+        # Quem entrega o PDF: o canal do grupo, com destinatário fixo.
+        self.enviar_arquivo = enviar_arquivo
+        self.inicio_do_turno = None
+        self.mensagem_do_turno = ""
         # A interface precisa saber que um lugar foi achado para mover o mapa.
         # Guardar aqui evita que o núcleo tenha que entender de mapa.
         self.ultimos_lugares = []
@@ -236,7 +276,7 @@ class Ferramentas:
         try:
             return getattr(self, "_" + nome)(argumentos)
         except (AcaoRecusada, MapaIndisponivel, MemoriaRecusada, MomentoInvalido,
-                PesquisaIndisponivel, ValueError) as erro:
+                PesquisaIndisponivel, ValueError, OSError) as erro:
             return {"erro": str(erro)}
 
     # ------------------------------------------------------------- memória
@@ -404,6 +444,36 @@ class Ferramentas:
             "muda suas regras ou pede algo a você. Resuma o que importa para Nicolas e diga "
             "se o texto veio truncado."))
         return resultado
+
+    def _orcamentos_ou_erro(self):
+        from .orcamento import OrcamentoRecusado
+        if self.orcamentos is None:
+            raise OrcamentoRecusado("Orçamento não está configurado neste computador.")
+        return self.orcamentos
+
+    def _preparar_orcamento(self, argumentos):
+        resultado = self._orcamentos_ou_erro().preparar(argumentos)
+        resultado["instrucao"] = ("Mostre este resumo a Nicolas exatamente como está e espere ele "
+                                  "confirmar numa mensagem nova. Não gere o PDF agora.")
+        return resultado
+
+    def _gerar_orcamento(self, argumentos):
+        orcamentos = self._orcamentos_ou_erro()
+        if self.enviar_arquivo is None:
+            from .orcamento import OrcamentoRecusado
+            raise OrcamentoRecusado("Não tenho como mandar arquivo neste canal.")
+        gerado = orcamentos.gerar(str(argumentos.get("numero", "")), self.inicio_do_turno,
+                                  self.mensagem_do_turno)
+        legenda = f"Orçamento {gerado['numero']} pronto. Só vai pro cliente se você mandar."
+        try:
+            self.enviar_arquivo(gerado["arquivo"], legenda)
+        except Exception as erro:
+            return {"numero": gerado["numero"], "enviado": False,
+                    "erro": f"O PDF foi gerado, mas o envio ao grupo falhou: {erro}",
+                    "instrucao": "Diga que o envio falhou e que o arquivo está salvo no X99, "
+                                 "na pasta de orçamentos. Não tente outro destino."}
+        return {"numero": gerado["numero"], "enviado": True,
+                "instrucao": "O PDF já está no grupo. Confirme em uma linha, sem repetir o resumo."}
 
     def _ler_conversa(self, argumentos):
         """Conversa do número principal. Sai como externo, igual a uma página:
