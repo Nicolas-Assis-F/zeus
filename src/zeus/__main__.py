@@ -71,13 +71,13 @@ def emit(event, **fields):
     print(json.dumps({"event": event, **fields}, ensure_ascii=False), flush=True)
 
 
-def montar_conversas(config, store):
+def montar_conversas(config, store, midia=None):
     """Leitura sob pedido do número principal, quando a ponte A existe."""
     if not config.principal_banco:
         return None
     from .conversas import LeitorDeConversas
     return LeitorDeConversas(config.principal_banco, config.sessao_principal, store,
-                             config.principal_acompanhados, config.principal_crm)
+                             config.principal_acompanhados, config.principal_crm, midia)
 
 
 def montar(args):
@@ -85,11 +85,13 @@ def montar(args):
     store = Store(args.state_dir.expanduser())
     persona = Persona.carregar(config.persona)
     pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
+    from .midia import montar_midia
+    midia = montar_midia(config, args.state_dir.expanduser())
     ferramentas = Ferramentas(store, pesquisa=pesquisa,
                               acoes=montar_acoes(config, store),
                               mapa=montar_mapa(config, args.state_dir.expanduser()),
-                              conversas=montar_conversas(config, store),
-                              base=Base(config.base_conhecimento))
+                              conversas=montar_conversas(config, store, midia),
+                              base=Base(config.base_conhecimento), midia=midia)
     canal = None
     if config.canal_configurado:
         from .canais import montar_canal
@@ -199,6 +201,9 @@ def ligar_modelo(zeus, config):
     servido = provedor.verificar()
     # Cada chamada paga vai para o log: é assim que se mede um dia de uso.
     contabilizar(provedor, lambda uso: emit("uso_modelo", **uso))
+    midia = getattr(zeus.ferramentas, "midia", None)
+    if midia is not None and midia.visao is not None:
+        contabilizar(midia.visao, lambda uso: emit("uso_modelo", papel="visao", **uso))
     zeus.provedor = provedor
     return servido
 
@@ -767,7 +772,8 @@ def _executar(zeus, store, config):
     # também quando só os pontos quentes estão configurados.
     if (config.vigia_configurado or config.quentes_configurado) and zeus.canal is not None:
         from .principal import VigiaPrincipal
-        vigia = VigiaPrincipal(config.principal_banco, config.principal_acompanhados, store)
+        vigia = VigiaPrincipal(config.principal_banco, config.principal_acompanhados, store,
+                               midia=zeus.ferramentas.midia)
     if config.quentes_configurado and zeus.canal is not None:
         from .quentes import VigiaDeQuentes
         quentes = VigiaDeQuentes(config.principal_banco, config.sessao_principal,

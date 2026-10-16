@@ -70,6 +70,12 @@ def texto_da_mensagem(linha) -> str:
     return conteudo
 
 
+def extras_da_midia(linha) -> dict:
+    """Tipo cru, nome do arquivo e legenda: o que `midia.py` precisa para ler."""
+    return {"tipo_midia": linha["media_type"] or "", "arquivo": linha["filename"] or "",
+            "legenda": (linha["content"] or "").strip()}
+
+
 class LeituraDaPonte:
     """Lê o banco de uma ponte sem nunca escrever nele."""
 
@@ -92,7 +98,7 @@ class LeituraDaPonte:
         if chats:
             filtros.append("chat_jid IN (%s)" % ",".join("?" for _ in chats))
             parametros.extend(chats)
-        sql = ("SELECT rowid AS linha, id, chat_jid, sender, content, timestamp, media_type "
+        sql = ("SELECT rowid AS linha, id, chat_jid, sender, content, timestamp, media_type, filename "
                "FROM messages WHERE " + " AND ".join(filtros) + " ORDER BY rowid LIMIT ?")
         parametros.append(limite)
         conexao = self._abrir()
@@ -107,7 +113,7 @@ class LeituraDaPonte:
             em = instante(linha["timestamp"])
             item = {"linha": linha["linha"], "id": linha["id"], "chat": linha["chat_jid"],
                     "remetente": linha["sender"] or "", "texto": texto_da_mensagem(linha),
-                    "midia": bool(linha["media_type"]), "em": em, "antiga": bool(desde and em < desde)}
+                    "midia": bool(linha["media_type"]), **extras_da_midia(linha), "em": em, "antiga": bool(desde and em < desde)}
             mensagens.append(item)
         return mensagens
 
@@ -116,7 +122,7 @@ class LeituraDaPonte:
         conexao = self._abrir()
         try:
             linhas = conexao.execute(
-                "SELECT rowid AS linha, id, chat_jid, sender, content, timestamp, media_type "
+                "SELECT rowid AS linha, id, chat_jid, sender, content, timestamp, media_type, filename "
                 "FROM messages WHERE chat_jid=? AND is_from_me=0 ORDER BY timestamp DESC, rowid DESC "
                 "LIMIT ?", (chat, int(limite))).fetchall()
         except sqlite3.Error as erro:
@@ -129,7 +135,8 @@ class LeituraDaPonte:
             if texto:
                 mensagens.append({"linha": linha["linha"], "id": linha["id"], "chat": linha["chat_jid"],
                                   "remetente": linha["sender"] or "", "texto": texto,
-                                  "midia": bool(linha["media_type"]), "em": instante(linha["timestamp"]),
+                                  "midia": bool(linha["media_type"]), **extras_da_midia(linha),
+                                  "em": instante(linha["timestamp"]),
                                   "antiga": False})
         return mensagens
 
@@ -142,7 +149,7 @@ class LeituraDaPonte:
         conexao = self._abrir()
         try:
             linhas = conexao.execute(
-                "SELECT rowid AS linha, id, chat_jid, sender, content, timestamp, media_type, "
+                "SELECT rowid AS linha, id, chat_jid, sender, content, timestamp, media_type, filename, "
                 "is_from_me FROM messages WHERE chat_jid IN (%s) "
                 "ORDER BY timestamp DESC, rowid DESC LIMIT ?" % ",".join("?" for _ in chats),
                 chats + (int(limite),)).fetchall()
@@ -151,8 +158,29 @@ class LeituraDaPonte:
         finally:
             conexao.close()
         return [{"id": l["id"], "chat": l["chat_jid"], "texto": texto_da_mensagem(l) or "(vazia)",
-                 "midia": bool(l["media_type"]), "em": instante(l["timestamp"]),
+                 "midia": bool(l["media_type"]), **extras_da_midia(l), "em": instante(l["timestamp"]),
                  "meu": bool(l["is_from_me"])} for l in reversed(linhas)]
+
+    def midia(self, mensagem: str, chat: str = ""):
+        """Os dados de uma mensagem com mídia, para baixar e ler. None se não há."""
+        sql = ("SELECT id, chat_jid, content, media_type, filename, file_length FROM messages "
+               "WHERE id=? AND media_type != ''")
+        parametros = [mensagem]
+        if chat:
+            sql += " AND chat_jid=?"
+            parametros.append(chat)
+        conexao = self._abrir()
+        try:
+            linha = conexao.execute(sql + " ORDER BY rowid DESC LIMIT 1", parametros).fetchone()
+        except sqlite3.Error as erro:
+            raise ErroDeCanal(f"O banco da ponte não respondeu: {erro}") from None
+        finally:
+            conexao.close()
+        if linha is None:
+            return None
+        return {"id": linha["id"], "chat": linha["chat_jid"], "tipo": linha["media_type"],
+                "arquivo": linha["filename"] or "", "legenda": (linha["content"] or "").strip(),
+                "tamanho": int(linha["file_length"] or 0)}
 
     def ultima_linha(self) -> int:
         conexao = self._abrir()
@@ -209,7 +237,7 @@ class CanalWhatsApp:
     CURSOR = "whatsapp_cursor"
 
     def __init__(self, ponte_url: str, banco: str, grupo: str, remetentes,
-                 store=None, transporte=None, intervalo: float = 2.0):
+                 store=None, transporte=None, intervalo: float = 2.0, midia=None):
         remetentes = lista(remetentes)
         if not ponte_url or not grupo or not remetentes:
             raise ErroDeCanal("WhatsApp exige ponte, grupo e ao menos um remetente autorizado.")
@@ -220,6 +248,7 @@ class CanalWhatsApp:
         self.store = store
         self.transporte = transporte or transporte_da_ponte
         self.intervalo = intervalo
+        self.midia = midia
 
     def verificar(self) -> str:
         self.leitura.ultima_linha()
@@ -275,10 +304,17 @@ class CanalWhatsApp:
             self.store.kv_set(self.CURSOR, self.leitura.ultima_linha())
             return []
         novas = self.leitura.novas(cursor, chats=(self.grupo,))
-        # Áudio e foto de Nicolas ainda não viram pedido: sem transcrição aqui,
-        # o Zeus responderia a "[áudio sem legenda]" como se fosse texto.
-        validas = [m for m in novas if m["remetente"] in self.remetentes
-                   and m["texto"] and not m["midia"]]
+        validas = []
+        for m in novas:
+            if m["remetente"] not in self.remetentes:
+                continue
+            if not m["midia"]:
+                if m["texto"]:
+                    validas.append(m)
+            elif self.midia is not None:
+                # Sem leitor de mídia, o Zeus responderia a "[áudio sem
+                # legenda]" como se fosse texto: aí a mídia fica de fora.
+                validas.append(dict(m, texto=self._texto_da_midia(m)))
         if not novas:
             time.sleep(self.intervalo if espera is None else espera)
             return []
@@ -293,6 +329,18 @@ class CanalWhatsApp:
             db.execute("INSERT INTO kv (chave,valor) VALUES (?,?) ON CONFLICT(chave) "
                        "DO UPDATE SET valor=excluded.valor", (self.CURSOR, str(maior)))
         return self._pendentes()
+
+    def _texto_da_midia(self, m) -> str:
+        """O áudio de Nicolas é a voz dele: vira o pedido. Documento, foto e
+        vídeo podem trazer texto de terceiro, então ficam como marcador e são
+        lidos por `ler_midia`, que marca o resultado como externo."""
+        from ..midia import MidiaIndisponivel, marcador
+        if m.get("tipo_midia") != "audio":
+            return marcador(m, "grupo")
+        try:
+            return "[áudio de Nicolas, transcrito] " + self.midia.ler("grupo", m["id"], m["chat"])["texto"]
+        except MidiaIndisponivel as erro:
+            return f"[Nicolas mandou um áudio que não consegui transcrever: {erro}]"
 
     def confirmar(self, identificador):
         if self.store is None or identificador is None:

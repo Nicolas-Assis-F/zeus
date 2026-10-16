@@ -52,8 +52,11 @@ class VigiaPrincipal:
     CURSOR = "principal_cursor"
     DESDE = "principal_desde"
 
-    def __init__(self, banco: str, conversas, store, relogio=None):
+    def __init__(self, banco: str, conversas, store, relogio=None, midia=None):
         self.leitura = LeituraDaPonte(banco)
+        # Com leitor de mídia, o áudio do contato vem transcrito no aviso: o
+        # Henrique pede quase tudo por áudio. Continua dado de terceiro.
+        self.midia = midia
         self.conversas = acompanhados(conversas)
         self.store = store
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
@@ -97,6 +100,8 @@ class VigiaPrincipal:
             # Sincronização de histórico regrava mensagem velha com rowid novo.
             if m["antiga"] or not m["texto"] or m["linha"] <= int(piso.get(m["chat"], 0)):
                 continue
+            if m["midia"] and self.midia is not None:
+                m = dict(m, texto=self.midia.transcricao("principal", m))
             por_conversa.setdefault(m["chat"], []).append(m)
         lotes = []
         for chat, mensagens in por_conversa.items():
