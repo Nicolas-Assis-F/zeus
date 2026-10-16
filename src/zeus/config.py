@@ -120,6 +120,9 @@ class Config:
     # vazio, usa a que fica ao lado de `principal_banco`. Os níveis listados
     # viram aviso no grupo, e Nicolas libera ou bloqueia o contato.
     principal_crm: str = ""
+    # Base de conhecimento (preços, importação, clientes), fora de qualquer
+    # repositório. Escrita só por Nicolas e pelo Claude: é fonte confiável.
+    base_conhecimento: str = "~/.local/share/zeus/conhecimento"
     principal_sessao: str = ""
     quentes_niveis: tuple = ("quente", "morno")
     quentes_tipos_ignorados: tuple = ("fornecedor", "concorrente", "transportadora")

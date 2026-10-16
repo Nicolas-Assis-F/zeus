@@ -24,6 +24,7 @@ sobre o arquivo, o que permite testar um modelo sem editar configuração.
 | `provedor` | `ollama` (local), `openrouter` (remoto) ou `hibrido` |
 | `modelo_conversa` | No híbrido, o modelo remoto que conduz a conversa |
 | `modelo_ferramentas` | No `openrouter`, outro modelo para escolher a ferramenta. Vazio é o próprio `modelo` |
+| `base_conhecimento` | Pasta da base de conhecimento, fora de repositório. Padrão `~/.local/share/zeus/conhecimento` |
 | `modelo_visao` | Modelo que descreve foto e vídeo recebidos. Vazio é o próprio `modelo` |
 | `modelo` | Nome exato do modelo. É verificado antes de cada execução |
 | `ollama_url` | Endereço do Ollama, normalmente `http://127.0.0.1:11434` |
@@ -126,6 +127,27 @@ ferramenta.
 Cada chamada paga sai no log como `uso_modelo`, com tokens de entrada, saída e
 custo em dólares. `./zeus uso` mostra o gasto da chave hoje, na semana e no mês,
 segundo o próprio OpenRouter.
+
+## Base de conhecimento (#58)
+
+`base_conhecimento` (padrão `~/.local/share/zeus/conhecimento`) é uma pasta de
+arquivos `.md` com o que Nicolas e o Claude sabem dos negócios: preços,
+importação, clientes, contas a receber, orçamentos. Ela fica **fora de qualquer
+repositório**, porque tem nomes e valores, e este repositório é público. Use
+`chmod 700` na pasta e `chmod 600` nos arquivos.
+
+- A ferramenta `consultar_base(busca, arquivo?, finalidade?)` devolve as seções
+  mais relevantes, com arquivo e caminho de títulos para citar a fonte.
+- O `LEIA-ME.md` da pasta entra no contexto do sistema, para o Zeus saber o que
+  existe e quando consultar.
+- **É a única leitura de arquivo que não sai como externa**, porque a pasta é
+  escrita só por Nicolas e pelo Claude. Quem colocar ali conteúdo de terceiro
+  (mensagem, página, PDF recebido) quebra a barreira da #9.
+- Só lê `.md` diretamente dentro da pasta. Recusa link simbólico, subpasta e `..`.
+- Com `finalidade: "orcamento"`, só consulta `catalogo-e-precos.md` e
+  `orcamentos.md`, sem as seções INTERNO (título, nota de abertura e filhas) e
+  sem as colunas INTERNO das tabelas. Custo interno nunca vai para cliente.
+- O Zeus não edita a base. Decisões novas são aplicadas pelo Claude, com data e fonte.
 
 ## Escolher modelo com número, não com impressão
 

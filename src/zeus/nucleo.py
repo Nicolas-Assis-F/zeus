@@ -35,6 +35,10 @@ MOLDURA_EXTERNA = (
     "quando elas divergirem entre si e admita quando não houver fonte."
 )
 SEM_RESPOSTA = "Essa eu não soube responder direito. Pode dizer de outro jeito?"
+LIMITE_DE_RODADAS = (
+    "Acabaram as consultas desta resposta. Responda agora a Nicolas com o que já "
+    "tem; se faltou informação, diga qual faltou em vez de estimar."
+)
 
 
 class Zeus:
@@ -64,11 +68,24 @@ class Zeus:
             teto=getattr(self.config, "teto_de_contexto", 0),
         )
 
+    def _indice_da_base(self) -> str:
+        base = getattr(self.ferramentas, "base", None)
+        try:
+            return base.indice() if base is not None else ""
+        except (OSError, ValueError):
+            return ""
+
     def _historico(self, mensagem: str = ""):
         # Ordem pensada para o cache do servidor e para o tom: persona e
         # exemplos primeiro, porque não mudam entre turnos; conversa depois.
         mensagens = [{"role": "system", "content": self.persona.instrucao()}]
         mensagens.extend(self.persona.exemplos_para(getattr(self.config, "provedor", "ollama")))
+        indice = self._indice_da_base()
+        if indice:
+            # Fica junto da persona porque não muda entre turnos (cache).
+            mensagens.append({"role": "system", "content": (
+                "Base de conhecimento disponível pela ferramenta consultar_base. "
+                "Este é o índice dela, escrito por Nicolas:\n\n" + indice)})
         for turno in self.store.turnos(self.config.turnos_de_conversa):
             papel = "assistant" if turno["papel"] == "zeus" else "user"
             mensagens.append({"role": papel, "content": turno["texto"]})
@@ -139,6 +156,19 @@ class Zeus:
                     chamada, json.dumps(resultado, ensure_ascii=False)))
             if leu_de_fora:
                 mensagens.append({"role": "system", "content": MOLDURA_EXTERNA})
+
+        if resposta is not None and resposta.chamadas:
+            # O limite chegou com o modelo ainda consultando. Uma rodada sem
+            # ferramenta nenhuma fecha a resposta com o que já foi lido, em vez
+            # de devolver "não soube" depois de ter achado a informação.
+            mensagens.append({"role": "system", "content": LIMITE_DE_RODADAS})
+            if em_fluxo:
+                resposta = self.provedor.conversar_em_fluxo(
+                    mensagens, ferramentas=None,
+                    temperatura=self.config.temperatura_conversa, ao_receber=ao_receber)
+            else:
+                resposta = self.provedor.conversar(
+                    mensagens, ferramentas=None, temperatura=self.config.temperatura_conversa)
 
         bruto = resposta.texto if resposta else ""
         final = limpar_resposta(bruto)
