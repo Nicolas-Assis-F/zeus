@@ -101,6 +101,7 @@ forense e não remove cópias de segurança anteriores.
 - [Orçamento de contexto](docs/CONTEXTO.md)
 - [Entrega 1 — Presença](docs/ENTREGA_1.md)
 - [Desenvolvimento aqui e execução no Zeus](docs/DESENVOLVIMENTO_E_DEPLOY.md)
+- [Preparar o X99 para o WhatsApp](docs/X99_WHATSAPP.md)
 - [Persona e próxima entrega](docs/PERSONA_E_PROXIMA_ENTREGA.md)
 - [Diário e decisões](docs/DIARIO.md)
 - `docs/referencia/`: plano mestre e histórico anterior, preservados como referência.
