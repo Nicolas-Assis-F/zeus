@@ -215,6 +215,30 @@ CATALOGO = [
         ["numero"],
     ),
     _ferramenta(
+        "preparar_tarefa",
+        "Escreve uma tarefa de código para o Claude Code do X99 e devolve o resumo para "
+        "Nicolas aprovar. Use quando Nicolas pedir mudança num projeto (zeus, sistemale, dash). "
+        "O pedido deve dizer o que fazer, onde e como saber que ficou certo, em suas palavras. "
+        "Mostre o resumo exatamente como vier.",
+        {"projeto": {"type": "string", "description": "zeus, sistemale ou dash"},
+         "titulo": {"type": "string", "description": "Curto, vira o nome da branch"},
+         "pedido": {"type": "string", "description": "O que fazer, com critério de pronto"}},
+        ["projeto", "titulo", "pedido"],
+    ),
+    _ferramenta(
+        "iniciar_tarefa",
+        "Começa uma tarefa já preparada, só depois que Nicolas aprovou o resumo numa mensagem "
+        "nova. Roda em segundo plano; o aviso chega no grupo quando terminar.",
+        {"numero": {"type": "integer"}},
+        ["numero"],
+    ),
+    _ferramenta(
+        "situacao_tarefas",
+        "Lista as últimas tarefas repassadas ao Claude Code, com situação, branch e PR.",
+        {},
+        [],
+    ),
+    _ferramenta(
         "ler_conversa",
         "Lê as últimas mensagens de uma conversa do número principal de Nicolas, com hora e "
         "quem falou. Use quando ele perguntar o que alguém mandou ou disse. O contato é o nome "
@@ -241,7 +265,7 @@ class Ferramentas:
 
     def __init__(self, store, relogio=None, pesquisa=None, acoes=None, mapa=None,
                  conversas=None, base=None, midia=None, orcamentos=None,
-                 enviar_arquivo=None):
+                 enviar_arquivo=None, tarefas=None):
         self.store = store
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
         self.pesquisa = pesquisa
@@ -251,6 +275,7 @@ class Ferramentas:
         self.base = base
         self.midia = midia
         self.orcamentos = orcamentos
+        self.tarefas = tarefas
         # Quem entrega o PDF: o canal do grupo, com destinatário fixo.
         self.enviar_arquivo = enviar_arquivo
         self.inicio_do_turno = None
@@ -474,6 +499,30 @@ class Ferramentas:
                                  "na pasta de orçamentos. Não tente outro destino."}
         return {"numero": gerado["numero"], "enviado": True,
                 "instrucao": "O PDF já está no grupo. Confirme em uma linha, sem repetir o resumo."}
+
+    def _tarefas_ou_erro(self):
+        from .tarefas import TarefaRecusada
+        if self.tarefas is None:
+            raise TarefaRecusada("O repasse para o Claude Code não está configurado.")
+        return self.tarefas
+
+    def _preparar_tarefa(self, argumentos):
+        resultado = self._tarefas_ou_erro().preparar(argumentos.get("projeto"),
+                                                     argumentos.get("titulo"),
+                                                     argumentos.get("pedido"))
+        resultado["instrucao"] = ("Mostre este resumo a Nicolas exatamente como está e espere ele "
+                                  "aprovar numa mensagem nova. Não inicie agora.")
+        return resultado
+
+    def _iniciar_tarefa(self, argumentos):
+        iniciada = self._tarefas_ou_erro().iniciar(argumentos.get("numero"), self.inicio_do_turno,
+                                                   self.mensagem_do_turno)
+        iniciada["instrucao"] = ("Diga em uma linha que a tarefa começou e que o aviso chega no "
+                                 "grupo quando terminar.")
+        return iniciada
+
+    def _situacao_tarefas(self, argumentos):
+        return {"tarefas": self._tarefas_ou_erro().situacao()}
 
     def _ler_conversa(self, argumentos):
         """Conversa do número principal. Sai como externo, igual a uma página:

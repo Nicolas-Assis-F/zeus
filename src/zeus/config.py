@@ -130,6 +130,12 @@ class Config:
     # Orçamentos de teste (#62): PDF, registro e sequência, fora de qualquer git.
     # Os preços vêm de precos.json, na base de conhecimento.
     orcamentos_pasta: str = "~/.local/share/zeus/orcamentos"
+    # Repasse para o Claude Code do X99 (#64): `nome=caminho` de cada
+    # repositório, limite de tempo e de gasto por tarefa. Vazio desliga.
+    tarefas_projetos: tuple = ()
+    tarefas_pasta: str = "~/.local/share/zeus/tarefas"
+    tarefas_minutos: int = 45
+    tarefas_usd: float = 5.0
     # Base de conhecimento (preços, importação, clientes), fora de qualquer
     # repositório. Escrita só por Nicolas e pelo Claude: é fonte confiável.
     base_conhecimento: str = "~/.local/share/zeus/conhecimento"

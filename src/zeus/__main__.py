@@ -22,6 +22,7 @@ from . import __version__
 from .acoes import Acoes
 from .base import Base
 from .orcamento import Orcamentos
+from .tarefas import Tarefas, projetos
 from .mapa import Mapa
 from .saudacao import compor as compor_saudacao
 from .saudacao import identificador_de_boot
@@ -72,6 +73,14 @@ def emit(event, **fields):
     print(json.dumps({"event": event, **fields}, ensure_ascii=False), flush=True)
 
 
+def montar_tarefas(config):
+    repositorios = projetos(config.tarefas_projetos)
+    if not repositorios:
+        return None
+    return Tarefas(config.tarefas_pasta, repositorios, limite_minutos=config.tarefas_minutos,
+                   orcamento_usd=config.tarefas_usd)
+
+
 def montar_conversas(config, store, midia=None):
     """Leitura sob pedido do número principal, quando a ponte A existe."""
     if not config.principal_banco:
@@ -94,7 +103,8 @@ def montar(args):
                               conversas=montar_conversas(config, store, midia),
                               base=Base(config.base_conhecimento), midia=midia,
                               orcamentos=Orcamentos(config.orcamentos_pasta, os.path.join(
-                                  os.path.expanduser(config.base_conhecimento), "precos.json")))
+                                  os.path.expanduser(config.base_conhecimento), "precos.json")),
+                              tarefas=montar_tarefas(config))
     canal = None
     if config.canal_configurado:
         from .canais import montar_canal
@@ -345,6 +355,8 @@ def main():
                  pontos_quentes=diagnostico_dos_quentes(config),
                  base_conhecimento=Base(config.base_conhecimento).diagnostico(),
                  orcamentos=zeus.ferramentas.orcamentos.diagnostico(),
+                 tarefas=(zeus.ferramentas.tarefas.diagnostico() if zeus.ferramentas.tarefas
+                          else "desligadas"),
                  config=config.sem_segredos())
             return 0 if integrity == "ok" and modelo_verificado else 1
 
@@ -808,6 +820,17 @@ def _executar(zeus, store, config):
                     # conversa: o vigia tenta de novo na próxima rodada.
                     avisos = []
                     emit("vigia_indisponivel", detalhe=str(erro)[:200])
+                if zeus.ferramentas.tarefas is not None:
+                    try:
+                        for tarefa, texto in zeus.ferramentas.tarefas.verificar():
+                            # O resumo vem de um agente que leu o repositório:
+                            # vai como aviso, fora do histórico da conversa.
+                            chave = f"tarefa:{tarefa['numero']}:{tarefa['situacao']}"
+                            if fila_de_saida.preparar(chave, zeus.canal.nome, texto,
+                                                      tipo="aviso_terceiro"):
+                                avisos.append(texto)
+                    except Exception as erro:
+                        emit("tarefas_indisponivel", detalhe=str(erro)[:200])
                 if quentes is not None:
                     from .quentes import rodada_de_quentes
                     try:
