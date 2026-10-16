@@ -109,6 +109,14 @@ class Config:
     principal_banco: str = ""
     principal_acompanhados: tuple = ()
     intervalo_principal: int = 15
+    # Pontos quentes: conversa 1:1 no número principal de alguém do CRM da LE
+    # (`leads.json`). A sessão da ponte A (`whatsapp.db`) liga LID a telefone;
+    # vazio, usa a que fica ao lado de `principal_banco`. Os níveis listados
+    # viram aviso no grupo, e Nicolas libera ou bloqueia o contato.
+    principal_crm: str = ""
+    principal_sessao: str = ""
+    quentes_niveis: tuple = ("quente", "morno")
+    quentes_tipos_ignorados: tuple = ("fornecedor", "concorrente", "transportadora")
     # Preenchido por carregar(): dizer de onde a configuração veio evita a
     # confusão de editar um arquivo que o programa nunca lê.
     origem: str = "nenhum arquivo lido"
@@ -130,6 +138,16 @@ class Config:
     @property
     def vigia_configurado(self) -> bool:
         return bool(self.principal_banco and self.principal_acompanhados)
+
+    @property
+    def quentes_configurado(self) -> bool:
+        return bool(self.principal_banco and self.principal_crm)
+
+    @property
+    def sessao_principal(self) -> str:
+        if self.principal_sessao or not self.principal_banco:
+            return self.principal_sessao
+        return os.path.join(os.path.dirname(self.principal_banco), "whatsapp.db")
 
     def sem_segredos(self) -> dict:
         """Representação segura para log: nenhum token aparece."""

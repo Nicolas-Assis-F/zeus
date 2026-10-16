@@ -111,6 +111,28 @@ class LeituraDaPonte:
             mensagens.append(item)
         return mensagens
 
+    def ultimas(self, chat: str, limite: int = 8):
+        """As últimas mensagens recebidas numa conversa, da mais velha à mais nova."""
+        conexao = self._abrir()
+        try:
+            linhas = conexao.execute(
+                "SELECT rowid AS linha, id, chat_jid, sender, content, timestamp, media_type "
+                "FROM messages WHERE chat_jid=? AND is_from_me=0 ORDER BY timestamp DESC, rowid DESC "
+                "LIMIT ?", (chat, int(limite))).fetchall()
+        except sqlite3.Error as erro:
+            raise ErroDeCanal(f"O banco da ponte não respondeu: {erro}") from None
+        finally:
+            conexao.close()
+        mensagens = []
+        for linha in reversed(linhas):
+            texto = texto_da_mensagem(linha)
+            if texto:
+                mensagens.append({"linha": linha["linha"], "id": linha["id"], "chat": linha["chat_jid"],
+                                  "remetente": linha["sender"] or "", "texto": texto,
+                                  "midia": bool(linha["media_type"]), "em": instante(linha["timestamp"]),
+                                  "antiga": False})
+        return mensagens
+
     def ultima_linha(self) -> int:
         conexao = self._abrir()
         try:
