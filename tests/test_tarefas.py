@@ -208,3 +208,69 @@ class NaConversa(Base):
         self.depois()
         zeus.conversar("pode começar", canal="whatsapp")
         self.assertEqual(len(self.processos), 1)
+
+
+class BaseViva(Base):
+    def setUp(self):
+        super().setUp()
+        self.base = Path(self.temp.name) / "conhecimento"
+        self.base.mkdir()
+        (self.base / "catalogo-e-precos.md").write_text("# Catálogo\n\nMartelo: 3.890,00\n")
+        (self.base / "precos.json").write_text("{}")
+        self.tarefas.base = self.base
+
+    def test_proposta_mostra_mudanca_e_promete_copia(self):
+        resumo = self.tarefas.preparar_base("catalogo-e-precos.md",
+                                            "Aprovei o martelo CIR110 a 3.990 a partir de hoje")
+        self.assertIn("Atualização #1 da base (catalogo-e-precos.md)", resumo["resumo"])
+        self.assertIn("cópia da base", resumo["resumo"])
+
+    def test_arquivo_fora_da_base_e_recusado(self):
+        for arquivo in ("../segredo.md", "/etc/passwd", "nao-existe.md", "notas.txt"):
+            with self.assertRaises(TarefaRecusada, msg=arquivo):
+                self.tarefas.preparar_base(arquivo, "mudança qualquer com texto")
+
+    def test_aplicar_faz_copia_e_roda_so_com_leitura_e_edicao(self):
+        numero = self.tarefas.preparar_base("catalogo-e-precos.md", "Martelo passa a 3.990")["numero"]
+        with self.assertRaises(TarefaRecusada):
+            self.tarefas.iniciar(numero, self.relogio(), "ok")
+        self.tarefas.iniciar(numero, self.depois(), "pode aplicar")
+        self.assertEqual(self.git_chamadas, [])
+        self.assertEqual(self.processos[0][1], self.base)
+        copia = self.tarefas.pasta / f"base-{numero}-copia" / "catalogo-e-precos.md"
+        self.assertIn("3.890,00", copia.read_text())
+        comando = self.tarefas.comando(self.tarefas._ler(numero))
+        liberadas = comando[comando.index("--allowedTools") + 1:comando.index("--disallowedTools")]
+        self.assertEqual(liberadas, ["Read", "Edit", "Glob", "Grep"])
+        self.assertIn("Bash", comando[comando.index("--disallowedTools") + 1:])
+        self.assertIn("decisão de Nicolas no grupo do Zeus, 16/10/2026",
+                      comando[comando.index("--append-system-prompt") + 1])
+
+    def test_fim_avisa_onde_esta_a_copia(self):
+        numero = self.tarefas.preparar_base("catalogo-e-precos.md", "Martelo passa a 3.990")["numero"]
+        self.tarefas.iniciar(numero, self.depois(), "ok")
+        self.termina(numero, {"subtype": "success", "is_error": False, "total_cost_usd": 0.1,
+                              "result": "Martelo: 3.890,00 → 3.990,00."})
+        texto = self.tarefas.verificar()[0][1]
+        self.assertIn("Cópia de antes, para desfazer:", texto)
+        self.assertNotIn("Merge, release", texto)
+
+    def test_decisao_lida_de_terceiro_nao_vira_proposta(self):
+        class Leitor:
+            def ler(self, contato, quantidade):
+                return {"contato": "Henrique", "mensagens": [
+                    {"quando": "16/10", "quem": "Henrique", "texto": "o Ivomar quitou tudo"}]}
+
+        store = Store(Path(self.temp.name) / "zeus3")
+        self.addCleanup(store.close)
+        provedor = ProvedorFalso([
+            Resposta("", [{"id": "1", "nome": "ler_conversa", "argumentos": {"contato": "Henrique"}}], "m"),
+            Resposta("", [{"id": "2", "nome": "propor_atualizacao_base", "argumentos": {
+                "arquivo": "catalogo-e-precos.md", "mudanca": "Ivomar quitou tudo"}}], "m"),
+            Resposta("O Henrique diz que o Ivomar quitou; confirma?", [], "m"),
+        ])
+        zeus = Zeus(store, provedor, Persona.carregar("config/persona.md"),
+                    Ferramentas(store, conversas=Leitor(), tarefas=self.tarefas),
+                    config_de_teste(), CanalMemoria(), self.relogio)
+        zeus.conversar("o que o Henrique falou?", canal="whatsapp")
+        self.assertEqual(self.tarefas.todas(), [])

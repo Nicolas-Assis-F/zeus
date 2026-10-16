@@ -78,7 +78,7 @@ def montar_tarefas(config):
     if not repositorios:
         return None
     return Tarefas(config.tarefas_pasta, repositorios, limite_minutos=config.tarefas_minutos,
-                   orcamento_usd=config.tarefas_usd)
+                   orcamento_usd=config.tarefas_usd, base=config.base_conhecimento)
 
 
 def montar_conversas(config, store, midia=None):
