@@ -221,6 +221,15 @@ class TestConversa(Base):
         self.assertIn("interromper menos", z.conversar("não precisava", canal="whatsapp"))
         self.assertLess(self.a.feedback.peso("hardware"), 1.0)
 
+    def test_novo_objetivo_no_texto_cria_sem_modelo(self):
+        z = self.zeus()
+        r = z.conversar("Novo objetivo: renegociar o frete até sexta. A transportadora X mandou proposta.", canal="whatsapp")
+        self.assertIn("Assumi o objetivo", r)
+        self.assertEqual(z.provedor.chamadas, 0)
+        o = self.a.objetivos.listar()[0]
+        self.assertEqual(o["titulo"], "Renegociar o frete até sexta")
+        self.assertIn("transportadora X", o["pedido_original"])
+
     def test_criar_e_listar_objetivo_pela_ferramenta(self):
         r = self.f.executar("criar_objetivo", {"titulo": "Renegociar o frete", "pedido": "vê o frete", "prazo_dias": 3})
         self.assertIn("objetivo", r)

@@ -11,6 +11,7 @@ essas fontes sem ser reconstruído.
 """
 
 import json
+import re
 from datetime import datetime, timezone
 
 from .guarda import limpar_resposta
@@ -174,7 +175,8 @@ class Zeus:
         # "ok 4821" decide uma aprovação da autonomia (#85) sem passar pelo
         # modelo: o código é do servidor, e quem decide é o canal do Nicolas.
         decidida = None if respondida else (self._decidir_aprovacao(texto, canal)
-                                            or self._feedback_de_aviso(texto, canal))
+                                            or self._feedback_de_aviso(texto, canal)
+                                            or self._novo_objetivo(texto))
         if decidida is not None:
             self.store.registrar_turno(canal, "nicolas", texto, agora)
             self.store.registrar_turno(canal, "zeus", decidida, self.relogio())
@@ -317,6 +319,27 @@ class Zeus:
         if self.ao_decidir_aprovacao is not None:
             self.ao_decidir_aprovacao()
         return "\n".join(linhas)
+
+    NOVO_OBJETIVO = re.compile(r"^\s*(?:\[áudio de Nicolas, transcrito\]\s*)?(?:novo\s+)?objetivo\s*:\s*(.{8,})",
+                               re.IGNORECASE | re.DOTALL)
+
+    def _novo_objetivo(self, texto: str):
+        """"Novo objetivo: …" cria o objetivo sem perguntar ao modelo se deve (#85)."""
+        if getattr(self.ferramentas, "autonomia", None) is None:
+            return None
+        achado = self.NOVO_OBJETIVO.match(str(texto))
+        if not achado:
+            return None
+        pedido = achado.group(1).strip()
+        titulo = re.split(r"[.;\n]", pedido, maxsplit=1)[0].strip()
+        if len(titulo) > 80:  # corta na palavra, não no meio dela
+            titulo = titulo[:80].rsplit(" ", 1)[0].rstrip(",") + "…"
+        titulo = titulo[:1].upper() + titulo[1:]
+        r = self.ferramentas.executar("criar_objetivo", {"titulo": titulo, "pedido": pedido})
+        if r.get("erro"):
+            return f"Não consegui criar o objetivo: {r['erro']}"
+        return (f"Assumi o objetivo {r['objetivo']}: {titulo}. Vou trabalhando sozinho; "
+                "aviso quando precisar de você e quando terminar, com a evidência.")
 
     FEEDBACK = {"util": "util", "foi util": "util", "nao precisava": "nao_precisava",
                 "nao precisava avisar": "nao_precisava", "mais tarde": "mais_tarde"}

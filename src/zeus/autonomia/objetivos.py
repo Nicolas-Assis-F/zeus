@@ -357,7 +357,7 @@ class Objetivos:
             mudou = db.execute(
                 "UPDATE passos SET estado=?, resultado=?, verificacao=?, custo_usd=custo_usd+?, "
                 "desfazer_json=?, terminado_em=? WHERE id=? AND estado='executando'",
-                (estado, cortar(resultado, 2000), cortar(verificacao, 2000), custo,
+                (estado, cortar(resultado, 8000), cortar(verificacao, 2000), custo,
                  desfazer_json, agora if estado != "aguardando" else None, int(passo_id))).rowcount
             if not mudou:
                 return False
