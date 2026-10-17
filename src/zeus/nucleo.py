@@ -14,6 +14,7 @@ import json
 from datetime import datetime, timezone
 
 from .guarda import limpar_resposta
+from .recibo import conferir, fotografar
 from .entregas import Entregas
 
 MAXIMO_DE_RODADAS = 6
@@ -61,6 +62,7 @@ class Zeus:
         self.capacidades = {"pesquisa": bool(ferramentas.pesquisa and
                                               ferramentas.pesquisa.disponivel())}
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
+        self.ao_afirmacao_vazia = None
 
     # ------------------------------------------------------------ contexto
     def _sistema(self, mensagem: str = ""):
@@ -178,6 +180,7 @@ class Zeus:
             if ao_receber is not None:
                 ao_receber(atalho)
             return atalho
+        memoria_antes = fotografar(self.store)  # para pegar "anotei" sem anotar (#78)
         mensagens = self._historico(texto)
         self.store.registrar_turno(canal, "nicolas", texto, agora)
         if respondida:
@@ -271,6 +274,9 @@ class Zeus:
         final = limpar_resposta(bruto)
         if not final:
             final = SEM_RESPOSTA
+        final, vazia = conferir(final, memoria_antes, fotografar(self.store))
+        if vazia and self.ao_afirmacao_vazia is not None:
+            self.ao_afirmacao_vazia()
         if em_fluxo and final != bruto.strip():
             ao_receber(None)  # a limpeza mexeu no texto; a tela precisa do final
         self.store.registrar_turno(canal, "zeus", final, self.relogio())
