@@ -173,7 +173,9 @@ class NaConversa(Base_):
 
     def test_limite_de_consultas_fecha_com_resposta(self):
         busca = {"id": "x", "nome": "consultar_base", "argumentos": {"busca": "bomba submersa"}}
-        zeus, provedor, _ = self.zeus([Resposta("", [busca], "m")] * 3 +
+        # #82: a segunda chamada idêntica já encerra as consultas (sem
+        # informação nova), e a rodada final, sem ferramentas, responde.
+        zeus, provedor, _ = self.zeus([Resposta("", [busca], "m")] * 2 +
                                       [Resposta("Não tenho o preço da bomba submersa.", [], "m")])
         resposta = zeus.conversar("quanto custa uma bomba submersa?", canal="cli")
         self.assertEqual(resposta, "Não tenho o preço da bomba submersa.")

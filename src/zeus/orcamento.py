@@ -94,7 +94,7 @@ EMITENTE = [
     "Telefone: (62) 98601-8386",
     "E-mail: letorneadora@gmail.com",
 ]
-RODAPE = ("Capital de 250 000 R$ - CNPJ: 44.492.124/0001-07 - "
+RODAPE = ("Capital de 100 000 R$ - CNPJ: 44.492.124/0001-07 - "
           "Inscrição Estadual: 10.875.250-0")
 OBRIGATORIOS = {"nome": "nome comercial", "razao_social": "razão social ou titular",
                 "doc": "CPF ou CNPJ", "endereco": "endereço", "cidade": "cidade",
@@ -270,7 +270,7 @@ def _blocos(p, o):
     if c.get("ie"):
         linhas.append(f"Inscrição Estadual: {c['ie']}")
     linhas += quebrar(c["endereco"], "F1", 8.3, 227)
-    linhas.append(f"{c['cidade']} - {c['uf']}, CEP {so_digitos(c['cep'])}")
+    linhas.append(f"{c['cidade']} - {c['uf']}, CEP {so_digitos(c['cep']) or c['cep']}")
     if c.get("email"):
         linhas.append(c["email"])
     for i, linha in enumerate(linhas[:8]):
@@ -344,10 +344,13 @@ def desenhar(o, logo: bytes = b"") -> bytes:
             p.texto(42, 96, "Data prevista para a entrega:", "F2", 8.3, COR_TABELA)
             p.texto(187, 96, o["entrega"], "F1", 8.3, COR_TABELA)
             p.texto(372, 116, "Total (sem imposto)", "F1", 8.5, COR_SEM_IMPOSTO)
-            p.texto(550.3, 116, brl(o["total_centavos"]), "F1", 8.5, COR_SEM_IMPOSTO, "dir")
+            p.texto(550.3, 116, brl(o.get("subtotal_centavos", o["total_centavos"])), "F1", 8.5, COR_SEM_IMPOSTO, "dir")
             p.retangulo(368, 96, 185.28, 15, preencher=FUNDO_TOTAL)
             p.texto(372, 100, "Total", "F1", 8.5, COR_TABELA)
             p.texto(550.3, 100, brl(o["total_centavos"]), "F1", 8.5, COR_TABELA, "dir")
+        if indice == len(grupos) and o.get("desconto_centavos"):
+            p.texto(372, 82, "Desconto", "F1", 8.5, COR_TABELA)
+            p.texto(550.3, 82, brl(o["desconto_centavos"]), "F1", 8.5, COR_TABELA, "dir")
         paginas.append(p)
     return montar_pdf(paginas, logo)
 
@@ -406,8 +409,14 @@ class Orcamentos:
 
     def _item(self, bruto, catalogo) -> tuple:
         sku = str(bruto.get("sku", "")).strip().upper()
+        valor_quantidade = bruto.get("quantidade", 1)
+        if valor_quantidade is None or valor_quantidade == "":
+            valor_quantidade = 1
         try:
-            quantidade = int(bruto.get("quantidade") or 1)
+            quantidade = int(valor_quantidade)
+            if isinstance(valor_quantidade, bool) or (isinstance(valor_quantidade, float)
+                                                     and not valor_quantidade.is_integer()):
+                quantidade = 0
         except (TypeError, ValueError):
             quantidade = 0
         if quantidade < 1:
@@ -421,10 +430,18 @@ class Orcamentos:
         item = dict(base or {"sku": sku, "rotulo": str(bruto.get("rotulo") or sku),
                              "descricao": str(bruto.get("descricao") or ""),
                              "origem": str(bruto.get("origem") or "Brasil")})
+        # Correção técnica de Nicolas prevalece sobre a descrição do catálogo.
+        # A ausência da chave preserva a base; string vazia remove o texto antigo.
+        for campo in ("rotulo", "descricao"):
+            if campo in bruto:
+                item[campo] = str(bruto[campo] or "")
         aviso = ""
         if informado:
             try:
                 item["preco_centavos"] = int(informado)
+                if isinstance(informado, bool) or (isinstance(informado, float)
+                                                 and not informado.is_integer()):
+                    raise ValueError()
             except (TypeError, ValueError):
                 raise OrcamentoRecusado(f"Preço informado inválido em {sku}.") from None
             if item["preco_centavos"] <= 0:
@@ -441,10 +458,12 @@ class Orcamentos:
             raise OrcamentoRecusado("Orçamento indisponível: " + self.diagnostico() + ".")
         cliente = {k: " ".join(str(v or "").split())
                    for k, v in (pedido.get("cliente") or {}).items()}
+        if not cliente.get("nome"):
+            raise OrcamentoRecusado("Falta o nome do cliente.")
         faltam = [rotulo for campo, rotulo in OBRIGATORIOS.items() if not cliente.get(campo)]
-        if faltam:
-            raise OrcamentoRecusado("Faltam dados do cliente: " + ", ".join(faltam) +
-                                    ". Pergunte a Nicolas numa mensagem só.")
+        for campo in OBRIGATORIOS:
+            if not cliente.get(campo):
+                cliente[campo] = "Não informado"
         catalogo = self._catalogo()
         itens, avisos = [], []
         for bruto in pedido.get("itens") or []:
@@ -454,6 +473,12 @@ class Orcamentos:
                 avisos.append(aviso)
         if not itens:
             raise OrcamentoRecusado("O orçamento precisa de ao menos um item.")
+        subtotal = sum(i["preco_centavos"] * i["quantidade"] for i in itens)
+        desconto = pedido.get("desconto_centavos", 0)
+        if type(desconto) is not int or not 0 <= desconto <= subtotal:
+            raise OrcamentoRecusado("Desconto inválido: informe centavos entre zero e o subtotal.")
+        if faltam:
+            avisos.append("Cadastro incompleto: " + ", ".join(faltam) + ".")
         agora = self.relogio()
         numero = self._proximo_numero(agora)
         codigo = str(pedido.get("codigo_cliente") or "").strip()
@@ -469,7 +494,8 @@ class Orcamentos:
             "termos_pagamento": str(pedido.get("termos_pagamento") or "A combinar"),
             "entrega": str(pedido.get("entrega") or "A combinar"),
             "itens": itens,
-            "total_centavos": sum(i["preco_centavos"] * i["quantidade"] for i in itens),
+            "subtotal_centavos": subtotal, "desconto_centavos": desconto,
+            "total_centavos": subtotal - desconto,
             "avisos": avisos,
         }
         (self.pasta / "rascunhos").mkdir(mode=0o700, exist_ok=True)
@@ -489,11 +515,81 @@ class Orcamentos:
                           + (f" ({i['variante']})" if i.get("variante") else ""))
             origem = i.get("fonte", "") + (f", {i['data']}" if i.get("data") else "")
             linhas.append(f"    {reais(i['preco_centavos'])} cada ({origem})")
+            for campo in ("descricao", "variante", "observacao"):
+                if i.get(campo):
+                    linhas.append(f"    {campo.capitalize()}: {i[campo]}")
+        if o.get("desconto_centavos"):
+            linhas += [f"Subtotal: {reais(o['subtotal_centavos'])}",
+                       f"Desconto: {reais(o['desconto_centavos'])}"]
+        linhas.extend(o.get("avisos", []))
         linhas += [f"Total: {reais(o['total_centavos'])} (ICMS 0%)", "",
                    f"Pagamento: {o['pagamento_extenso']}", f"Entrega: {o['entrega']}",
                    "Frete: por conta do cliente (não entra no orçamento)", "",
                    "Posso gerar o PDF?"]
         return "\n".join(linhas)
+
+    def _ler_rascunho(self, numero=""):
+        if not numero:
+            arquivos = list((self.pasta / "rascunhos").glob("ZT*.json"))
+            if not arquivos:
+                raise OrcamentoRecusado("Não há orçamento preparado.")
+            numero = max(arquivos, key=lambda p: p.stat().st_mtime).stem
+        if not re.fullmatch(r"ZT\d{4}-\d{4,}", str(numero)):
+            raise OrcamentoRecusado("Número de orçamento inválido.")
+        try:
+            return json.loads((self.pasta / "rascunhos" / (str(numero) + ".json")).read_text())
+        except (OSError, ValueError):
+            raise OrcamentoRecusado(f"Não há orçamento {numero}.") from None
+
+    def consultar(self, numero=""):
+        o = self._ler_rascunho(numero)
+        return {"numero": o["numero"], "gerado": bool(o.get("gerado")),
+                "cliente": o["cliente"], "itens": o["itens"],
+                "total_centavos": o["total_centavos"],
+                "desconto_centavos": o.get("desconto_centavos", 0),
+                "pagamento_extenso": o["pagamento_extenso"], "entrega": o["entrega"],
+                "resumo": self.resumo(o).removesuffix("\n\nPosso gerar o PDF?")}
+
+    def revisar(self, numero, alteracoes):
+        """Revisão incremental preserva os dados que Nicolas não mudou."""
+        o = self._ler_rascunho(numero)
+        campos = {"cliente", "itens", "desconto_centavos", "pagamento_extenso",
+                  "termos_pagamento", "entrega", "ref_cliente"}
+        if not isinstance(alteracoes, dict) or not alteracoes or set(alteracoes) - campos:
+            raise OrcamentoRecusado("Informe apenas os campos do orçamento que deseja alterar.")
+        if "itens" in alteracoes and not isinstance(alteracoes["itens"], list):
+            raise OrcamentoRecusado("Alterações de itens precisam vir como lista.")
+        pedido = {k: o[k] for k in ("pagamento_extenso", "termos_pagamento", "entrega", "ref_cliente")}
+        pedido["cliente"] = {k: v for k, v in o["cliente"].items() if v != "Não informado"}
+        pedido["codigo_cliente"] = o["codigo_cliente"]
+        pedido["desconto_centavos"] = o.get("desconto_centavos", 0)
+        itens = []
+        for item in o["itens"]:
+            novo = {k: item[k] for k in ("sku", "rotulo", "descricao", "quantidade", "variante", "observacao") if k in item}
+            if item.get("fonte") == "valor que você informou":
+                novo["preco_informado_centavos"] = item["preco_centavos"]
+            itens.append(novo)
+        if "cliente" in alteracoes:
+            if not isinstance(alteracoes["cliente"], dict):
+                raise OrcamentoRecusado("Cliente precisa vir como objeto.")
+            pedido["cliente"].update(alteracoes["cliente"])
+        for mudanca in alteracoes.get("itens", []):
+            permitidos = {"indice", "descricao", "rotulo", "variante", "observacao",
+                          "quantidade", "preco_informado_centavos"}
+            if not isinstance(mudanca, dict) or set(mudanca) - permitidos:
+                raise OrcamentoRecusado("Alteração de item inválida.")
+            indice = mudanca.get("indice")
+            if type(indice) is not int or not 1 <= indice <= len(itens):
+                raise OrcamentoRecusado("Índice de item inválido; conte a partir de 1.")
+            itens[indice - 1].update({k: v for k, v in mudanca.items() if k != "indice"})
+        pedido.update({k: v for k, v in alteracoes.items() if k not in ("cliente", "itens")})
+        pedido["itens"] = itens
+        r = self.preparar(pedido)
+        caminho = self.pasta / "rascunhos" / (r["numero"] + ".json")
+        dados = json.loads(caminho.read_text())
+        dados["substitui"] = o["numero"]
+        _gravar(caminho, dados)
+        return dict(r, substitui=o["numero"])
 
     def gerar(self, numero: str, inicio_do_turno, mensagem: str) -> dict:
         caminho = self.pasta / "rascunhos" / f"{Path(str(numero)).name}.json"

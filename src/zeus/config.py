@@ -91,6 +91,9 @@ class Config:
     temperatura_conversa: float = 0.75
     temperatura_decisao: float = 0.0
     turnos_de_conversa: int = 12
+    # Só abrevia respostas antigas do assistente no prompt. Registros e falas
+    # do dono permanecem íntegros; pedidos em foco vêm dos dados estruturados.
+    historico_resposta_caracteres: int = 2000
     teto_de_contexto: int = 600
     intervalo_agenda: int = 30
     atraso_maximo_lembrete: int = 86400
@@ -121,6 +124,9 @@ class Config:
     # viram aviso no grupo, e Nicolas libera ou bloqueia o contato.
     principal_crm: str = ""
     principal_ponte_url: str = "http://127.0.0.1:8080"
+    # Habilitado por Nicolas para atuar como secretário no número principal.
+    # O executor ainda exige comando de envio e registra resultado incerto.
+    principal_envio_ativo: bool = False
     # Mídia do WhatsApp (#60): teto antes de baixar, duração máxima de áudio
     # (o microfone da HUD tem o dele) e threads da transcrição. A visão usa
     # `modelo_visao`, ou o próprio modelo do OpenRouter.
@@ -132,6 +138,10 @@ class Config:
     orcamentos_pasta: str = "~/.local/share/zeus/orcamentos"
     # Repasse para o Claude Code do X99 (#64): `nome=caminho` de cada
     # repositório, limite de tempo e de gasto por tarefa. Vazio desliga.
+    documentos_pasta: str = "~/.local/share/zeus/documentos"
+    tarefas_orca_bin: str = "/home/zeus/.local/bin/orca-ide"
+    tarefas_agentes: tuple = ("codex", "claude")
+    tarefas_coordenador: str = ""
     tarefas_projetos: tuple = ()
     tarefas_pasta: str = "~/.local/share/zeus/tarefas"
     tarefas_minutos: int = 45

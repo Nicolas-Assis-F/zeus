@@ -203,7 +203,7 @@ class LeituraNaConversa(unittest.TestCase):
             self.assertIsNotNone(store.recall("tratamento"))
             # Na 2ª rodada, o catálogo só tinha ferramentas de leitura.
             nomes_r2 = {f["function"]["name"] for f in provedor.catalogos[1]}
-            self.assertEqual(nomes_r2, {"pesquisar", "ler_pagina"})
+            self.assertFalse(nomes_r2 & {"lembrar_fato", "esquecer_fato", "agendar_pergunta", "agendar_lembrete", "enviar_whatsapp", "gerar_orcamento", "iniciar_tarefa", "propor_atualizacao_base", "encerrar_pendencia", "abrir_no_computador"})  # #82: leituras e rascunhos seguem; ações, não
             store.close()
 
     def test_ferramenta_recusa_com_instrucao_quando_desligada(self):

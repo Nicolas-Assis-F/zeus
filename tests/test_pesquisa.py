@@ -172,7 +172,8 @@ class PaginaNaoManda(unittest.TestCase):
             nomes_rodada1 = {f["function"]["name"] for f in provedor.catalogos[0]}
             self.assertIn("esquecer_fato", nomes_rodada1)
             nomes_rodada2 = {f["function"]["name"] for f in provedor.catalogos[1]}
-            self.assertEqual(nomes_rodada2, {"pesquisar", "ler_pagina"})
+            # Snapshot de produção (#82): leituras e rascunhos seguem; ações, não.
+            self.assertFalse(nomes_rodada2 & {"lembrar_fato", "esquecer_fato", "agendar_pergunta", "agendar_lembrete", "enviar_whatsapp", "gerar_orcamento", "iniciar_tarefa", "propor_atualizacao_base", "encerrar_pendencia", "abrir_no_computador"})
             self.assertNotIn("esquecer_fato", nomes_rodada2)
             store.close()
 

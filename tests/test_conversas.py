@@ -120,7 +120,11 @@ class FerramentaNaConversa(Conversas):
         # nem abre outra conversa.
         oferecidas = {f["function"]["name"] for f in provedor.catalogos[1] or []}
         self.assertNotIn("lembrar_fato", oferecidas)
-        self.assertNotIn("ler_conversa", oferecidas)
+        # Snapshot de produção (#82): continuar a MESMA conversa segue
+        # disponível; abrir conversa de outra pessoa, não. Nenhuma ação.
+        self.assertFalse(oferecidas & {"lembrar_fato", "esquecer_fato", "agendar_pergunta", "agendar_lembrete", "enviar_whatsapp", "gerar_orcamento", "iniciar_tarefa", "propor_atualizacao_base", "encerrar_pendencia", "abrir_no_computador"})
+        self.assertTrue(zeus.ferramentas.permite_apos_externo("ler_conversa", {"contato": "Henrique"}))
+        self.assertFalse(zeus.ferramentas.permite_apos_externo("ler_conversa", {"contato": "Outra Pessoa"}))
 
     def test_sem_ponte_e_erro_claro(self):
         resultado = Ferramentas(self.store).executar("ler_conversa", {"contato": "Henrique"})

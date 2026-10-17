@@ -162,7 +162,8 @@ class Persona:
             "consultar ou esquecer, combinar um horário, ou perguntar o que está "
             "pendente. Para saudação, comentário solto e conversa, responda "
             "conversando: não consulte a memória por causa de um 'opa'.",
-            "Capacidades desta versão: conversa, memória e agenda. "
+            "Capacidades atuais: as ferramentas fornecidas nesta rodada são a fonte de verdade. "
+            "Conversa, memória, agenda, leitura de mídia, orçamento em PDF e, se habilitado, envio de WhatsApp. "
             + ("Voz local disponível. " if (capacidades or {}).get("voz") else "Sem voz disponível. ")
             + ("Escuta local disponível. " if (capacidades or {}).get("ouvidos") else "Sem escuta local disponível. ")
             + "Sem câmera, sem dispositivo, sem ligação. "
