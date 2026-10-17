@@ -48,7 +48,8 @@ export function montar(raiz) {
         return el("section", {class: "coluna", "aria-label": titulo}, el("h2", {}, `${titulo} · ${deles.length}`),
           deles.length ? deles.map((o) => el("article", {class: "objetivo", tabindex: "0", role: "button",
               onclick: () => detalhar(caixa, o), onkeydown: (e) => { if (e.key === "Enter") detalhar(caixa, o); }},
-            el("b", {}, o.titulo), el("div", {class: "prox"}, o.estado === "abandonado" ? "abandonado" : (o.proxima_acao || "—"))))
+            el("b", {}, o.titulo), el("div", {class: "prox"}, o.estado === "abandonado" ? "abandonado"
+              : o.estado === "concluido" ? "✓ " + String(o.evidencia || "concluído").slice(0, 90) : (o.proxima_acao || "—"))))
             : el("p", {class: "vazio"}, "—"));
       })),
       caixa));

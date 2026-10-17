@@ -38,7 +38,7 @@ export function cartaoPedido(a, compacto = false) {
   const resta = (a.expira_em || agora) - agora;
   const externo = String(a.origem || "").startsWith("externo");
   const negar = el("button", {class: "bt nao", type: "button", onclick: () => decidir(a.id, false)}, "Negar");
-  const aprovar = a.irreversivel || a.nivel === "PEDE_ANTES" && externo
+  const aprovar = a.irreversivel || externo
     ? botaoSegurar("Segure para aprovar", () => decidir(a.id, true))
     : el("button", {class: "bt ok", type: "button", onclick: () => decidir(a.id, true)}, "Aprovar");
   return el("article", {class: "pedido" + (resta < 600 ? " expirando" : ""), "aria-label": `Pedido ${a.codigo}`},

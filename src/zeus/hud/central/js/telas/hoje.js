@@ -47,7 +47,7 @@ export function montar(raiz) {
           agenda.length),
         cartao("Objetivos em andamento", lista(ativos, Z.estado.autonomia === "ligada" ? "Nenhum objetivo ativo. Peça um na conversa." :
           "A autonomia ainda não está ligada neste Zeus.", (o) => [
-          el("b", {}, o.titulo), el("span", {class: "meta"}, `${o.estado.replace("_", " ")} · próxima: ${o.proxima_acao || "—"}`)]),
+          el("b", {}, o.titulo), el("span", {class: "meta"}, `${o.estado === "aguardando_nicolas" ? "aguardando você" : o.estado} · próxima: ${o.proxima_acao || "—"}`)]),
           ativos.length, Z.estado.autonomia !== "ligada"),
         cartao("Perguntas do Zeus", lista(r.perguntas, "Nenhuma pergunta aberta.", (p) => [p.texto, el("span", {class: "meta"}, p.situacao + " · " + quando(p.vence_em))]),
           (r.perguntas || []).length),

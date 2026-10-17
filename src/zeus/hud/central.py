@@ -148,7 +148,7 @@ class Central:
         with self._trava:
             self._sessoes.pop(_hash(token or ""), None)
 
-    def sessao(self, cookies):
+    def sessao(self, cookies, ip=None):
         """('chave', id) | ('aparelho', id) | None. Renova a sessão em uso."""
         token = cookies.get(COOKIE_SESSAO, "")
         if token:
@@ -162,7 +162,7 @@ class Central:
                 self._sessoes.pop(chave, None)
         aparelho = cookies.get(COOKIE_APARELHO, "")
         if aparelho and self.pareamento is not None:
-            dados = self.pareamento.validar(aparelho)
+            dados = self.pareamento.validar(aparelho, ip)
             if dados:
                 return ("aparelho", dados.get("id"))
         return None
@@ -249,8 +249,17 @@ class Central:
     def retrato_autonomia(self):
         a = self.autonomia
         try:
-            return {"aprovacoes": a.aprovacoes.pendentes(self.relogio()),
-                    "objetivos": a.objetivos.listar(),
+            from ..autonomia.niveis import classificar
+            objetivos = a.objetivos.listar()
+            titulos = {o["id"]: o["titulo"] for o in objetivos}
+            aprovacoes = []
+            for pedido in a.aprovacoes.pendentes(self.relogio()):
+                # Irreversível vem do catálogo do código, nunca do modelo.
+                regra = classificar(pedido["acao"], pedido.get("args"))
+                aprovacoes.append({k: v for k, v in pedido.items() if k not in ("args_json", "args_hash")}
+                                  | {"irreversivel": bool(getattr(regra, "irreversivel", True)),
+                                     "objetivo_titulo": titulos.get(pedido.get("objetivo_id"))})
+            return {"aprovacoes": aprovacoes, "objetivos": objetivos,
                     "atividade": a.trilha.listar(limite=60)}
         except Exception as erro:  # banco próprio indisponível não derruba a tela
             return {"erro": str(erro)[:200]}
@@ -348,7 +357,7 @@ class _Rotas:
         return self.m.client_address[0] if self.m.client_address else ""
 
     def _sessao(self):
-        return self.c.sessao(self.cookies)
+        return self.c.sessao(self.cookies, self._ip())
 
     def _mesma_origem(self):
         """CSRF: o navegador manda Origin em POST; outro site não consegue
@@ -413,9 +422,12 @@ class _Rotas:
             if self.c.autonomia is None:
                 return self._json(503, {"erro": "autonomia desligada"})
             try:
-                return self._json(200, self.c.autonomia.objetivos.obter(int(rota.split("/")[1])))
+                objetivo = self.c.autonomia.objetivos.obter(int(rota.split("/")[1]))
             except (ValueError, KeyError, LookupError):
+                objetivo = None
+            if objetivo is None:
                 return self._json(404, {"erro": "objetivo não existe"})
+            return self._json(200, objetivo)
         if rota == "aparelhos":
             if self.c.pareamento is None or sessao[0] != "chave":
                 return self._json(403, {"erro": "só pelo PC"})
@@ -605,6 +617,8 @@ class _Rotas:
                 int(ident), dados["aprovar"], por="nicolas", canal="central")
         except (ValueError, LookupError) as erro:
             return self._json(409, {"erro": str(erro)[:200]})
+        if not resultado.get("ok"):
+            return self._json(409, {"erro": resultado.get("motivo") or "pedido não está mais pendente"})
         return self._json(200, resultado)
 
     def _objetivo(self, resto):
@@ -680,20 +694,26 @@ class _Rotas:
             esquema = "https" if self.c.hud.seguro else "http"
             return self._json(200, p.iniciar(f"{esquema}://{host}/central"))
         if rota.startswith("pareamento/") and rota.endswith("/aprovar"):
-            resultado = p.aprovar(rota.split("/")[1], bool(dados.get("aprovar")))
-            # O token volta uma vez, pelo fluxo, para a página do celular que
-            # está esperando; ele nunca aparece no PC.
+            reivindicacao = rota.split("/")[1]
+            try:
+                resultado = p.aprovar(reivindicacao, bool(dados.get("aprovar")))
+            except Exception as erro:
+                return self._json(409, {"erro": str(erro)[:200]})
+            # O token sai daqui uma vez, para a página do celular que está
+            # esperando; ele nunca aparece no PC nem no fluxo.
             token = resultado.pop("token", None)
+            resultado.pop("set_cookie", None)
             if token:
-                self._entregues_pendentes()[resultado.get("reivindicacao_id")] = token
+                self._entregues_pendentes()[reivindicacao] = token
             return self._json(200, resultado)
         if rota.startswith("aparelhos/") and rota.endswith("/revogar"):
-            return self._json(200, p.revogar(rota.split("/")[1]))
+            return self._json(200, {"revogado": p.revogar(rota.split("/")[1])})
         return self._json(404, {"erro": "rota desconhecida"})
 
     def _entregues_pendentes(self):
+        """Token aprovado esperando o celular buscar. Some depois de 5 min."""
         if not hasattr(self.c, "_tokens_para_entregar"):
-            self.c._tokens_para_entregar = {}
+            self.c._tokens_para_entregar = _PrazoCurto(300, self.c.relogio)
         return self.c._tokens_para_entregar
 
     def _reivindicar(self):
@@ -713,14 +733,36 @@ class _Rotas:
         try:
             resultado = p.reivindicar(str(dados.get("nonce") or ""), str(dados.get("nome") or "celular")[:60],
                                       self._ip())
-        except ValueError as erro:
-            return self._json(400, {"erro": str(erro)[:200]})
-        if resultado.get("erro"):
-            return self._json(429 if resultado.get("limite") else 400, resultado)
+        except Exception as erro:
+            motivo = getattr(erro, "motivo", "")
+            return self._json(429 if motivo in ("limite", "bloqueado") else 400,
+                              {"erro": str(erro)[:200], "motivo": motivo})
         self.c.publicar("pareamento", reivindicacao=resultado.get("reivindicacao_id"),
                         nome=str(dados.get("nome") or "celular")[:60],
                         codigo=resultado.get("codigo_conferencia"))
         return self._json(200, resultado)
+
+
+class _PrazoCurto(dict):
+    def __init__(self, prazo_s, relogio):
+        super().__init__()
+        self.prazo_s, self.relogio, self._em = prazo_s, relogio, {}
+
+    def __setitem__(self, chave, valor):
+        self._limpar()
+        self._em[chave] = self.relogio()
+        super().__setitem__(chave, valor)
+
+    def pop(self, chave, padrao=None):
+        self._limpar()
+        self._em.pop(chave, None)
+        return super().pop(chave, padrao)
+
+    def _limpar(self):
+        agora = self.relogio()
+        for chave in [c for c, em in self._em.items() if agora - em > self.prazo_s]:
+            self._em.pop(chave, None)
+            super().pop(chave, None)
 
 
 class Controles:

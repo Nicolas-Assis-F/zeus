@@ -38,8 +38,9 @@ export function montar(raiz) {
   const texto = el("textarea", {id: "texto", rows: 1, placeholder: "Fale com o Zeus…", enterkeyhint: "send", "aria-label": "Mensagem"});
   const botaoFalar = el("button", {class: "bt falar", id: "falar", type: "button", "aria-pressed": "false",
     title: podeGravar() ? "Segure para falar (Ctrl+Espaço)" : motivoSemMicrofone()}, "🎙");
-  const nota = el("p", {class: "nota"}, podeGravar() ? "Segure 🎙 ou Ctrl+Espaço para falar. Arraste para fora para cancelar."
-                                                     : motivoSemMicrofone());
+  const nota = el("p", {class: "nota"}, podeGravar()
+    ? ["Segure 🎙", el("span", {class: "so-teclado"}, " ou Ctrl+Espaço"), " para falar. Arraste para fora para cancelar."]
+    : motivoSemMicrofone());
   const enviar = async (e) => {
     if (e) e.preventDefault();
     const t = texto.value.trim();
