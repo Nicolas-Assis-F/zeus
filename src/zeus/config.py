@@ -87,6 +87,19 @@ class Config:
     # Mídia do WhatsApp inclui áudio de terceiros (clientes, Henrique). Ligar
     # manda essas vozes ao Scribe; o texto delas já vai ao modelo remoto.
     escuta_scribe_midia: bool = False
+    # Escuta no ambiente, pelo microfone da própria máquina (#68). Desligada
+    # por padrão: microfone ouvindo a casa é decisão de Nicolas. Fonte e saída
+    # são nomes de nó do PipeWire (`wpctl status`); vazio é o padrão do sistema.
+    escuta_ambiente: bool = False
+    escuta_ambiente_fonte: str = ""
+    escuta_ambiente_saida: str = ""
+    escuta_palavra: str = "hey_jarvis"
+    escuta_palavra_limiar: float = 0.5
+    escuta_fim_silencio_ms: int = 800
+    escuta_continuacao_s: float = 6.0
+    escuta_reconhecimento: str = "Deixa comigo, senhor."
+    escuta_reconhecimento_apos_s: float = 1.5
+    escuta_ao_acordar: str = ""
     hud_tls: bool = True
     escuta_modelo: str = "small"
     escuta_computo: str = "int8"

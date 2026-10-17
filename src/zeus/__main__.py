@@ -769,6 +769,11 @@ def _executar(zeus, store, config):
             contar_lugares()
 
     fala = FalaEmSegundoPlano(voz, hud.publicar) if hud is not None else None
+    from .escuta_continua import montar_escuta_ambiente
+    ambiente, motivo_ambiente = montar_escuta_ambiente(
+        config, estado_local, ouvidos, voz, recebidas_da_hud.put_nowait,
+        publicar=hud.publicar if hud is not None else None, emitir=emit)
+    emit("escuta_ambiente", situacao=motivo_ambiente)
     supervisor = SupervisorPresenca(estado_local, config, stopped, hud, operacao)
     supervisor.iniciar()
     if not supervisor.pronto.wait(5) or operacao.retrato().get('agenda', {}).get('estado') == 'indisponivel':
@@ -779,6 +784,8 @@ def _executar(zeus, store, config):
         if hud:
             hud.parar()
         raise ValueError('Não foi possível iniciar a agenda persistente.')
+    if ambiente is not None:
+        ambiente.iniciar()
     recepcao = None
     if zeus.canal is not None:
         def criar_receptor():
@@ -934,6 +941,19 @@ def _executar(zeus, store, config):
                     finally:
                         pedido["terminado"].set()
                     continue
+                if pedido.get("tipo") == "ambiente":
+                    # Fala ouvida pelo microfone da casa: a resposta volta pela
+                    # escuta, que fala no alto-falante; a HUD só acompanha.
+                    final = None
+                    try:
+                        if hud is not None:
+                            hud.publicar("mensagem", de="nicolas", texto=pedido["texto"],
+                                         hora=datetime.now().strftime("%H:%M"))
+                        final = responder(pedido["texto"], "voz", em_fluxo=True)
+                        anunciar("zeus", final)
+                    finally:
+                        pedido["responder"](final)
+                    continue
                 texto = pedido.get("texto", "")
                 if pedido.get("tipo") == "audio":
                     if hud is not None:
@@ -984,6 +1004,8 @@ def _executar(zeus, store, config):
             emit("heartbeat", storage="ok")
             ultimo_batimento = agora
 
+    if ambiente is not None:
+        ambiente.parar()
     supervisor.parar()
     if fala is not None:
         fala.parar()
