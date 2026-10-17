@@ -274,5 +274,9 @@ def montar_midia(config, estado):
     if config.openrouter_chave and modelo and config.provedor in ("openrouter", "hibrido"):
         from .llm import ProvedorOpenRouter
         visao = ProvedorOpenRouter(config.openrouter_url, modelo, config.openrouter_chave)
-    return Midia(origens, Path(estado) / "midia", _OUVIDOS[chave], visao,
+    ouvidos = _OUVIDOS[chave]
+    if config.escuta_scribe_midia:
+        from .ouvidos import com_escuta_remota
+        ouvidos = com_escuta_remota(config, estado, ouvidos)
+    return Midia(origens, Path(estado) / "midia", ouvidos, visao,
                  maximo_bytes=config.midia_max_mb * 1024 * 1024)
