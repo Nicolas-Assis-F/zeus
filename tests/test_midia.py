@@ -235,7 +235,9 @@ class FerramentaLerMidia(Midia_):
         self.assertIsNone(self.store.recall("desconto"))
         oferecidas = {f["function"]["name"] for f in provedor.catalogos[1] or []}
         self.assertNotIn("lembrar_fato", oferecidas)
-        self.assertNotIn("ler_midia", oferecidas)
+        # Snapshot de produção (#82): leituras seguem oferecidas depois do
+        # externo (ler_midia só aceita anexo da conversa já lida); ações, não.
+        self.assertFalse(oferecidas & {"lembrar_fato", "esquecer_fato", "agendar_pergunta", "agendar_lembrete", "enviar_whatsapp", "gerar_orcamento", "iniciar_tarefa", "propor_atualizacao_base", "encerrar_pendencia", "abrir_no_computador"})
 
     def test_sem_pontes_e_erro_claro(self):
         resultado = Ferramentas(self.store).executar("ler_midia", {"mensagem": "x", "origem": "grupo"})

@@ -110,11 +110,15 @@ class Preparo(Base):
         texto = self.orcamentos.preparar(pedido)["resumo"]
         self.assertIn("R$ 3.200,00 cada (valor que você informou)", texto)
 
-    def test_cliente_incompleto_pergunta_numa_mensagem(self):
+    def test_cliente_incompleto_vira_aviso_e_sem_nome_recusa(self):
+        # Snapshot de produção (#82): orçamento preliminar só com o nome; o
+        # que falta sai como aviso no resumo, em vez de bloquear.
+        resumo = self.orcamentos.preparar(dict(PEDIDO, cliente={"nome": "Ítalo"}))["resumo"]
+        self.assertIn("Cadastro incompleto", resumo)
+        self.assertIn("CPF ou CNPJ", resumo)
         with self.assertRaises(OrcamentoRecusado) as erro:
-            self.orcamentos.preparar(dict(PEDIDO, cliente={"nome": "Ítalo"}))
-        self.assertIn("CPF ou CNPJ", str(erro.exception))
-        self.assertIn("CEP", str(erro.exception))
+            self.orcamentos.preparar(dict(PEDIDO, cliente={"razao_social": "X"}))
+        self.assertIn("nome do cliente", str(erro.exception))
 
     def test_codigo_oficial_inventado_vira_teste(self):
         texto = self.orcamentos.preparar(dict(PEDIDO, codigo_cliente="CU-qualquer"))["resumo"]
@@ -164,7 +168,7 @@ class Geracao(Base):
                          "Valores Apresentados em Brazil Real", "LE-CAB80 - Cabeçote hidráulico 80 m",
                          "10 500,00", "7 800,00", "18 300,00", "(País de Origem: Brasil)",
                          'Haste 2 3/8" × 3 m', "Termos de pagamento:", "A combinar",
-                         "Telefone: (62) 98601-8386", "Capital de 250 000 R$", "1/1"):
+                         "Telefone: (62) 98601-8386", "Capital de 100 000 R$", "1/1"):
             self.assertIn(esperado, texto)
         self.assertNotIn("69286018386", texto)
 
