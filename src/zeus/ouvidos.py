@@ -13,6 +13,7 @@ falha: não ocupa a RAM à toa.
 import base64
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -39,6 +40,7 @@ class Ouvidos:
         self._motor = None
         self._erro = ""
         self.ultima_medicao = {}
+        self._trava = threading.Lock()
 
     def instalado(self):
         try:
@@ -77,6 +79,12 @@ class Ouvidos:
         return self._carregar() is not None
 
     def transcrever(self, arquivo, remover=True):
+        # A HUD (laço principal) e a escuta do ambiente (thread própria) podem
+        # pedir ao mesmo tempo; o modelo local é um só (#68).
+        with self._trava:
+            return self._transcrever(arquivo, remover)
+
+    def _transcrever(self, arquivo, remover=True):
         caminho = Path(arquivo)
         inicio = time.perf_counter()
         self._erro = ""
