@@ -10,6 +10,8 @@ O transporte é injetável para que o teste não precise de rede nem de servidor
 """
 
 import json
+import re
+import time
 import urllib.error
 import urllib.request
 
@@ -465,6 +467,145 @@ class ProvedorHibrido:
         return self.local.mensagem_de_ferramenta(chamada, conteudo)
 
 
+# --------------------------------------------------------------------------
+# Escada de modelos (#72).
+#
+# O primeiro degrau é o provedor de sempre; os seguintes respondem quando ele
+# falha. Cada degrau que falhou fica de lado por um tempo que depende do erro:
+# repetir a espera de rede em toda mensagem é pior que descer direto.
+
+DESCANSO_POR_STATUS = {429: 300, 402: 3600, 401: 6 * 3600, 403: 6 * 3600, 404: 6 * 3600}
+DESCANSO_SERVIDOR = 120
+DESCANSO_REDE = 60
+
+
+def descanso_do_erro(erro) -> float:
+    achado = re.search(r"respondeu (\d{3})", str(erro))
+    if not achado:
+        return DESCANSO_REDE  # rede, timeout, fluxo cortado
+    status = int(achado.group(1))
+    if status in DESCANSO_POR_STATUS:
+        return DESCANSO_POR_STATUS[status]
+    return DESCANSO_SERVIDOR if status >= 500 else 0
+
+
+def adaptar_mensagens(mensagens, alvo):
+    """Chamadas e resultados de ferramenta no formato do degrau que vai
+    responder: o Ollama quer argumentos em objeto, o OpenRouter quer id."""
+    convertidas, pendentes = [], []
+    for mensagem in mensagens:
+        if mensagem.get("role") == "assistant" and mensagem.get("tool_calls"):
+            pendentes = _normalizar_chamadas(mensagem["tool_calls"])
+            convertidas.append(alvo.mensagem_do_assistente(
+                Resposta(mensagem.get("content", ""), pendentes)))
+            pendentes = list(pendentes)
+        elif mensagem.get("role") == "tool" and pendentes:
+            convertidas.append(alvo.mensagem_de_ferramenta(pendentes.pop(0),
+                                                           mensagem.get("content", "")))
+        else:
+            convertidas.append(mensagem)
+    return convertidas
+
+
+class ProvedorEmEscada:
+    nome = "escada"
+
+    def __init__(self, degraus, ao_trocar=None, relogio=None):
+        if not degraus:
+            raise ErroDeModelo("A escada precisa de ao menos um degrau.")
+        self.degraus = list(degraus)
+        self.modelo = self.degraus[0].modelo
+        self.ao_trocar = ao_trocar
+        self.relogio = relogio or time.monotonic
+        self._descansa_ate = [0.0] * len(self.degraus)
+        self._erros = [""] * len(self.degraus)
+        self._atual = self.degraus[0]
+        self.ultimo_degrau = 0
+
+    def verificar(self) -> str:
+        """Pronto se ao menos um degrau responde; o primeiro que responder é
+        o nome servido. Degrau que falha a verificação começa descansando."""
+        erros = []
+        for indice, degrau in enumerate(self.degraus):
+            try:
+                servido = degrau.verificar()
+            except ErroDeModelo as erro:
+                erros.append(f"{degrau.modelo}: {erro}")
+                self._erros[indice] = str(erro)[:160]
+                self._descansa_ate[indice] = self.relogio() + max(descanso_do_erro(erro), 1)
+                continue
+            if indice:
+                return f"{servido} (degrau {indice + 1}; acima: {'; '.join(erros)[:200]})"
+            return servido
+        raise ErroDeModelo("Nenhum degrau da escada respondeu: " + "; ".join(erros)[:400])
+
+    def _ordem(self):
+        agora = self.relogio()
+        livres = [i for i in range(len(self.degraus)) if self._descansa_ate[i] <= agora]
+        # Todos descansando: tentar todos é melhor que não responder.
+        return livres or list(range(len(self.degraus)))
+
+    def _subir(self, chamar, ao_receber=None):
+        ordem = self._ordem()
+        # Quem ficou de fora por descanso também explica a troca.
+        motivos = [f"{self.degraus[i].modelo}: em descanso ({self._erros[i]})"
+                   for i in range(len(self.degraus)) if i not in ordem and i < (ordem[0] if ordem else 0)]
+        for indice in ordem:
+            degrau = self.degraus[indice]
+            try:
+                resposta = chamar(degrau)
+            except (ErroDeModelo, OSError) as erro:
+                motivos.append(f"{degrau.modelo}: {str(erro)[:160]}")
+                self._erros[indice] = str(erro)[:160]
+                self._descansa_ate[indice] = self.relogio() + descanso_do_erro(erro)
+                if ao_receber is not None:
+                    ao_receber(None)  # o que o degrau caído escreveu não vale
+                continue
+            if indice != self.ultimo_degrau and self.ao_trocar is not None:
+                try:
+                    self.ao_trocar(indice + 1, degrau.modelo, "; ".join(motivos))
+                except Exception:
+                    pass
+            self._atual, self.ultimo_degrau = degrau, indice
+            return resposta
+        raise ErroDeModelo("Todos os degraus falharam: " + "; ".join(motivos)[:400])
+
+    def conversar(self, mensagens, ferramentas=None, temperatura=0.0) -> Resposta:
+        return self._subir(lambda d: d.conversar(adaptar_mensagens(mensagens, d),
+                                                 ferramentas, temperatura))
+
+    def conversar_em_fluxo(self, mensagens, ferramentas=None, temperatura=0.0,
+                           ao_receber=None) -> Resposta:
+        def chamar(degrau):
+            convertidas = adaptar_mensagens(mensagens, degrau)
+            if hasattr(degrau, "conversar_em_fluxo"):
+                return degrau.conversar_em_fluxo(convertidas, ferramentas, temperatura,
+                                                 ao_receber)
+            return degrau.conversar(convertidas, ferramentas, temperatura)
+        return self._subir(chamar, ao_receber)
+
+    def mensagem_do_assistente(self, resposta: Resposta) -> dict:
+        return self._atual.mensagem_do_assistente(resposta)
+
+    def mensagem_de_ferramenta(self, chamada, conteudo: str) -> dict:
+        return self._atual.mensagem_de_ferramenta(chamada, conteudo)
+
+
+def _degrau(config, especificacao, transporte=None):
+    tipo, _, modelo = especificacao.partition(":")
+    tipo, modelo = tipo.strip().lower(), modelo.strip()
+    if not modelo:
+        raise ErroDeModelo(f"Degrau sem modelo: {especificacao!r}")
+    if tipo == "openrouter":
+        return ProvedorOpenRouter(config.openrouter_url, modelo, config.openrouter_chave,
+                                  transporte, timeout=config.escada_timeout_s)
+    if tipo == "ollama":
+        local = _ollama(config, transporte)
+        local.modelo = modelo
+        return local
+    raise ErroDeModelo(f"Degrau de tipo desconhecido: {especificacao!r}")
+
+
 def _ollama(config, transporte=None):
     """Um lugar só para montar o Ollama.
 
@@ -481,7 +622,21 @@ def _ollama(config, transporte=None):
         penalidade_de_repeticao=getattr(config, "penalidade_de_repeticao", 1.15))
 
 
-def criar_provedor(config, transporte=None):
+def criar_provedor(config, transporte=None, ao_trocar=None):
+    principal = _provedor_principal(config, transporte)
+    reserva = getattr(config, "escada_reserva", ()) or ()
+    if isinstance(reserva, str):  # ZEUS_ESCADA_RESERVA="openrouter:a,ollama:b"
+        reserva = [parte for parte in (p.strip() for p in reserva.split(",")) if parte]
+    if not reserva:
+        return principal
+    for parte in (principal, getattr(principal, "local", None), getattr(principal, "remoto", None)):
+        if isinstance(parte, ProvedorOpenRouter):
+            parte.timeout = config.escada_timeout_s
+    return ProvedorEmEscada([principal] + [_degrau(config, d, transporte) for d in reserva],
+                            ao_trocar=ao_trocar)
+
+
+def _provedor_principal(config, transporte=None):
     if config.provedor == "ollama":
         return _ollama(config, transporte)
     if config.provedor == "openrouter":
@@ -510,6 +665,8 @@ def contabilizar(provedor, funcao):
     for parte in (provedor, getattr(provedor, "local", None), getattr(provedor, "remoto", None)):
         if isinstance(parte, ProvedorOpenRouter):
             parte.ao_usar = funcao
+    for degrau in getattr(provedor, "degraus", ()):
+        contabilizar(degrau, funcao)
 
 
 def uso_da_chave(config, transporte=None) -> dict:

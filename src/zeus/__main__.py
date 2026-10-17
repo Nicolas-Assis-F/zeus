@@ -295,7 +295,8 @@ def retrato(store, config, voz, modelo="", ouvidos=None):
 
 def ligar_modelo(zeus, config):
     """Verificação obrigatória antes de usar o modelo em qualquer conversa."""
-    provedor = criar_provedor(config)
+    provedor = criar_provedor(config, ao_trocar=lambda degrau, modelo, motivo: emit(
+        "modelo_degrau", degrau=degrau, modelo=modelo, motivo=motivo[:300]))
     servido = provedor.verificar()
     # Cada chamada paga vai para o log: é assim que se mede um dia de uso.
     contabilizar(provedor, lambda uso: emit("uso_modelo", **uso))

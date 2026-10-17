@@ -30,6 +30,11 @@ class Config:
     # e custa uma chamada a mais quando não há ferramenta a usar. A visão
     # descreve foto e vídeo recebidos.
     modelo_ferramentas: str = ""
+    # Escada de modelos (#72): degraus de reserva depois do provedor acima,
+    # como "openrouter:anthropic/claude-haiku-5.5" ou "ollama:llama3.1:8b-...".
+    # Vazio é sem escada. O timeout vale para os degraus remotos.
+    escada_reserva: tuple = ()
+    escada_timeout_s: int = 60
     modelo_visao: str = ""
     keep_alive: str = "30m"
     limite_de_resposta: int = 320

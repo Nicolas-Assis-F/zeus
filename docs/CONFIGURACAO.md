@@ -171,3 +171,30 @@ dele podem sair no prompt. Não interpretar “texto da conversa” como somente
 O modo local continua padrão. A tarefa de roteamento do plano mestre deve
 acrescentar seleção e redução explícita desse contexto, com uma avaliação
 comparando qualidade, custo e latência reais.
+
+## Escada de modelos (#72)
+
+Quando o modelo principal falha, a mesma mensagem é respondida pelo degrau
+seguinte, em vez de virar "sem modelo":
+
+```json
+"escada_reserva": ["openrouter:anthropic/claude-haiku-5.5",
+                   "ollama:llama3.1:8b-instruct-q4_K_M"],
+"escada_timeout_s": 60
+```
+
+- O degrau 1 é o provedor configurado acima, inclusive híbrido ou
+  `modelo_ferramentas`.
+- Um degrau que falha fica de lado por um tempo que depende do erro: rede ou
+  timeout 60 s, 5xx 2 min, 429 5 min, 402 1 h, 401/403/404 6 h. Se todos
+  estiverem de lado, tenta todos assim mesmo.
+- A troca sai no log como `modelo_degrau`, com o número do degrau, o modelo e
+  o motivo. A volta ao degrau 1 também é registrada.
+- As mensagens de ferramenta são convertidas para o formato do degrau que vai
+  responder. Na HUD, o rascunho do degrau que caiu é apagado.
+- `escada_timeout_s` vale para os degraus remotos. Esperar os 120 s padrão
+  antes de descer seria tempo demais.
+
+Medido no X99 em 17/10/2026: com o OpenRouter inalcançável, o Ollama local
+respondeu em 68 s (o 8B fez uma pesquisa antes). Com o modelo principal
+inválido, o Haiku respondeu em 2,4 s.
