@@ -171,3 +171,24 @@ registraria o pedido interno como se você tivesse digitado "a máquina acabou
 de ligar" e esse turno apareceria no seu histórico. Só a resposta é gravada.
 
 Para desligar: `"saudacao_ao_ligar": false`.
+
+## Vigia do serviço (#70)
+
+O `Restart=on-failure` cuida de queda rápida. O que fica quebrado em silêncio
+(unidade em `failed`, chave recusada, ponte deslogada) é coberto pelo vigia,
+que roda a cada 10 minutos num timer e **fora** do processo do Zeus:
+
+```bash
+cp ~/zeus/deploy/zeus-vigia.service ~/zeus/deploy/zeus-vigia.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now zeus-vigia.timer
+journalctl --user -u zeus-vigia --since today   # uma linha JSON por rodada
+```
+
+Ele confere `zeus`, `ponte-principal`, `ponte-zeus` e o `./zeus check --modelo
+--canal`. Um problema só vira aviso depois de duas rodadas seguidas, para não
+avisar de reinício passageiro. A volta é avisada na primeira rodada. O aviso
+vai para `whatsapp_grupo` direto pela ponte B, então chega mesmo com o Zeus
+fora do ar. Sem a ponte B, fica só o registro no journal, e a rodada seguinte
+tenta de novo. Se o repositório do serviço não está em `~/zeus`, ajuste o
+caminho com um drop-in, como no `zeus.service`.
