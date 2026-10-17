@@ -329,6 +329,34 @@ CATALOGO.append(_ferramenta(
 CATALOGO.append(_ferramenta("responder_tarefa", "Responde uma pergunta pendente do agente no Orca com a decisão que Nicolas informou.",
     {"numero": {"type": "integer"}, "mensagem": {"type": "string"}}, ["numero", "mensagem"]))
 
+# Objetivos que andam sozinhos (#85). Criar e responder mudam estado; listar e
+# "o que você fez" são leitura do banco próprio da autonomia.
+CATALOGO.extend([
+    _ferramenta(
+        "criar_objetivo",
+        "Cria um objetivo que você vai levar adiante sozinho, por dias se preciso, até ter "
+        "evidência de que terminou. Use quando Nicolas pedir algo de vários passos ou que "
+        "depende de esperar (\"resolve\", \"cuida disso\", \"até sexta\"). Ações que falam com "
+        "terceiros ou são irreversíveis vão pedir aprovação a ele sozinhas.",
+        {"titulo": {"type": "string", "description": "Curto, no infinitivo: Renegociar o frete"},
+         "pedido": {"type": "string", "description": "O que Nicolas pediu, nas palavras dele"},
+         "prazo_dias": {"type": "number", "description": "Opcional: em quantos dias precisa estar pronto"}},
+        ["titulo", "pedido"]),
+    _ferramenta(
+        "responder_objetivo",
+        "Entrega ao objetivo a resposta que Nicolas deu para uma pergunta dele, para ele seguir.",
+        {"objetivo": {"type": "integer"}, "resposta": {"type": "string"}}, ["objetivo", "resposta"]),
+    _ferramenta(
+        "listar_objetivos",
+        "Lista os objetivos em andamento, aguardando Nicolas, bloqueados e concluídos, com a "
+        "próxima ação de cada um.", {}, []),
+    _ferramenta(
+        "o_que_fiz",
+        "O que você fez sozinho num dia (padrão: hoje), pela trilha de ações: o que executou, "
+        "o que pediu aprovação, o que falhou. Use para \"o que você fez hoje?\".",
+        {"dia": {"type": "string", "description": "AAAA-MM-DD; vazio é hoje"}}, []),
+])
+
 NOMES = {item["function"]["name"] for item in CATALOGO}
 
 # Ferramentas que só trazem dado de fora, sem mudar estado. Depois que conteúdo
@@ -337,7 +365,7 @@ NOMES = {item["function"]["name"] for item in CATALOGO}
 # garante isso é o núcleo; a lista mora aqui, junto do catálogo que descreve.
 # `ler_conversa` fica de fora de propósito: uma página que mande "leia a
 # conversa com fulano" não pode abrir conversa privada.
-NOMES_DE_LEITURA = {"pesquisar", "ler_pagina", "consultar_base", "ler_midia", "preparar_orcamento", "preparar_envio_whatsapp", "consultar_custos", "consultar_orcamento", "revisar_orcamento", "situacao_secretaria"}
+NOMES_DE_LEITURA = {"listar_objetivos", "o_que_fiz", "pesquisar", "ler_pagina", "consultar_base", "ler_midia", "preparar_orcamento", "preparar_envio_whatsapp", "consultar_custos", "consultar_orcamento", "revisar_orcamento", "situacao_secretaria"}
 
 
 class Ferramentas:
@@ -345,7 +373,8 @@ class Ferramentas:
 
     def __init__(self, store, relogio=None, pesquisa=None, acoes=None, mapa=None,
                  conversas=None, base=None, midia=None, orcamentos=None,
-                 enviar_arquivo=None, tarefas=None, envios_whatsapp=None, documentos=None):
+                 enviar_arquivo=None, tarefas=None, envios_whatsapp=None, documentos=None,
+                 autonomia=None):
         self.store = store
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
         self.pesquisa = pesquisa
@@ -358,6 +387,7 @@ class Ferramentas:
         self.documentos = documentos
         self.tarefas = tarefas
         self.envios_whatsapp = envios_whatsapp
+        self.autonomia = autonomia
         self.contatos_do_turno = set()
         # Quem entrega o PDF: o canal do grupo, com destinatário fixo.
         self.enviar_arquivo = enviar_arquivo
@@ -772,6 +802,56 @@ class Ferramentas:
         return {"moeda": "USD", "total_usd": round(sum(r['custo_usd'] for r in turnos), 8),
                 "turnos": turnos,
                 "cobertura": "Só turnos desde a ativação da medição; não é a fatura inteira da chave."}
+
+    # ----------------------------------------------------------- objetivos
+    def _autonomia_ou_erro(self):
+        if self.autonomia is None:
+            raise ValueError("Objetivos autônomos ainda não estão ligados neste Zeus.")
+        return self.autonomia
+
+    def _criar_objetivo(self, argumentos):
+        a = self._autonomia_ou_erro()
+        titulo = str(argumentos.get("titulo") or "").strip()[:120]
+        pedido = str(argumentos.get("pedido") or "").strip()[:1500]
+        if not titulo or not pedido:
+            raise ValueError("Objetivo precisa de título e do pedido de Nicolas.")
+        prazo = None
+        try:
+            if argumentos.get("prazo_dias"):
+                prazo = self.relogio().timestamp() + float(argumentos["prazo_dias"]) * 86400
+        except (TypeError, ValueError):
+            prazo = None
+        ident = a.objetivos.criar(titulo, pedido, proxima_acao="planejar o primeiro passo", prazo=prazo)
+        return {"objetivo": ident, "titulo": titulo, "instrucao":
+                "Diga em uma linha que você assumiu e que avisa no grupo quando precisar dele "
+                "ou quando terminar. Não descreva um plano que ainda não foi feito."}
+
+    def _responder_objetivo(self, argumentos):
+        a = self._autonomia_ou_erro()
+        try:
+            ident = int(argumentos.get("objetivo"))
+        except (TypeError, ValueError):
+            raise ValueError("Diga o número do objetivo.") from None
+        obj = a.objetivos.obter(ident, com_passos=False)
+        if obj is None:
+            raise ValueError(f"Não existe objetivo {ident}.")
+        memoria = dict(obj.get("estado_json") or {})
+        memoria.setdefault("respostas_do_nicolas", []).append(str(argumentos.get("resposta") or "")[:800])
+        a.objetivos.atualizar(ident, estado_json=memoria)
+        acordados = a.objetivos.acordar_por_evento(f"resposta:{ident}")
+        if not acordados and obj["estado"] in ("aguardando_nicolas", "bloqueado"):
+            a.objetivos.mudar_estado(ident, "ativo", "resposta do Nicolas")
+            a.objetivos.atualizar(ident, acordar_em=self.relogio().timestamp())
+        return {"objetivo": ident, "entregue": True}
+
+    def _listar_objetivos(self, argumentos):
+        a = self._autonomia_ou_erro()
+        return {"objetivos": [{k: o.get(k) for k in ("id", "titulo", "estado", "proxima_acao", "evidencia")}
+                              for o in a.objetivos.listar()][-20:]}
+
+    def _o_que_fiz(self, argumentos):
+        a = self._autonomia_ou_erro()
+        return a.trilha.resumo_do_dia(str(argumentos.get("dia") or "") or None)
 
     def _encerrar_pendencia(self, argumentos):
         tipo = argumentos.get("tipo")

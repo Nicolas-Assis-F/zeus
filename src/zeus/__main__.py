@@ -110,7 +110,8 @@ def montar(args):
                               base=Base(config.base_conhecimento), midia=midia,
                               orcamentos=Orcamentos(config.orcamentos_pasta, os.path.join(
                                   os.path.expanduser(config.base_conhecimento), "precos.json")),
-                              tarefas=montar_tarefas(config), documentos=Documentos(config.documentos_pasta))
+                              tarefas=montar_tarefas(config), documentos=Documentos(config.documentos_pasta),
+                              autonomia=montar_autonomia(config, args.state_dir.expanduser()))
     if config.principal_envio_ativo and conversas is not None:
         from .envios_whatsapp import EnviosWhatsApp
         ferramentas.envios_whatsapp = EnviosWhatsApp(
@@ -123,6 +124,16 @@ def montar(args):
         # Só o canal sabe mandar arquivo, e só para o grupo dele.
         ferramentas.enviar_arquivo = getattr(canal, "enviar_arquivo", None)
     return config, store, Zeus(store, None, persona, ferramentas, config, canal)
+
+
+def montar_autonomia(config, estado):
+    """Banco próprio da autonomia (#85); nada no banco do Zeus."""
+    if not config.autonomia_ativa:
+        return None
+    from .autonomia import Autonomia, segredo_do_arquivo
+    autonomia = Autonomia(Path(estado) / "autonomia.db", segredo=segredo_do_arquivo())
+    autonomia.objetivos.recuperar_passos_interrompidos()
+    return autonomia
 
 
 def montar_pesquisa(config, estado):
@@ -239,6 +250,80 @@ def responder_em_audio(canal, voz, pedido, resposta, destino):
     return ogg
 
 
+def montar_proatividade(zeus, store, config, controles, fila_de_saida, anunciar, voz, ambiente, hud,
+                        estado, modelo_ok):
+    """Motor dos objetivos (#85) e política de interrupção (#86). Sem autonomia,
+    nada disso existe e o Zeus segue como antes."""
+    autonomia = zeus.ferramentas.autonomia
+    if autonomia is None:
+        return None
+    from .motor import Motor
+    from .proatividade import Proatividade
+    publicar = hud.central.publicar if hud is not None and hud.central is not None else (lambda *a, **k: None)
+    falar, livre = falar_na_sala(voz, ambiente)
+    proatividade = Proatividade(autonomia, controles, fila_de_saida,
+                                zeus.canal.nome if zeus.canal is not None else None, anunciar=anunciar,
+                                falar_na_sala=falar, sala_livre=livre, emit=emit, estado_dir=estado,
+                                store=store, fechamento_hora=config.fechamento_hora)
+    proatividade.motor = Motor(autonomia, zeus.ferramentas,
+                               provedor=lambda: zeus.provedor if modelo_ok() else None,
+                               persona=zeus.persona, comunicar=proatividade.comunicar, store=store,
+                               autonomia_nivel=lambda: controles.ler().get("autonomia", "normal"),
+                               publicar=publicar)
+
+    def mudou(ap):
+        publicar("aprovacao", id=ap["id"], estado=ap["estado"], acao=ap["acao"])
+        if ap["estado"] != "pendente":
+            proatividade.nicolas_apareceu(f"aprovacao:{ap['id']}")
+    autonomia.aprovacoes.ao_mudar(mudou)
+    zeus.ao_decidir_aprovacao = lambda: publicar("atividade")
+    return proatividade
+
+
+def falar_na_sala(voz, ambiente):
+    """(falar, sala_livre). A escuta do ambiente, se existir, dona do alto-falante
+    e da guarda de eco; sem ela, um alto-falante próprio. Sem voz, nada."""
+    if voz is None or not voz.disponivel():
+        return None, (lambda: False)
+    if ambiente is not None:
+        return ambiente.anunciar, (lambda: ambiente.estado == ambiente.DORMINDO and ambiente.guarda.aberto())
+    from .escuta_continua import AltoFalante, GuardaDeEco, para_fala
+    alto = AltoFalante(GuardaDeEco())
+    if not alto.disponivel():
+        return None, (lambda: False)
+
+    def falar(texto):
+        Thread(target=lambda: alto.tocar(voz.falar(para_fala(texto))), daemon=True).start()
+    return falar, alto.guarda.aberto
+
+
+def tratar_pedido_de_autonomia(pedido, ferramentas, emit):
+    """Pausar, retomar, abandonar e desfazer pedidos pela Central (#84/#85)."""
+    a = ferramentas.autonomia
+    try:
+        if pedido["tipo"] == "objetivo_estado":
+            if pedido["estado"] == "ativo":
+                a.objetivos.mudar_estado(pedido["objetivo"], "ativo", "retomado pela Central")
+                a.objetivos.atualizar(pedido["objetivo"], acordar_em=time.time())
+            elif pedido["estado"] == "bloqueado":
+                a.objetivos.bloquear(pedido["objetivo"], pedido.get("motivo") or "pausado pela Central")
+            else:
+                a.objetivos.mudar_estado(pedido["objetivo"], "abandonado", "abandonado pela Central")
+        elif pedido["tipo"] == "desfazer":
+            registro = next((r for r in a.trilha.listar(limite=2000) if r["id"] == pedido["registro"]), None)
+            desfazer = (registro or {}).get("desfazer")
+            if not registro or not desfazer or registro.get("desfeito_em"):
+                emit("desfazer_recusado", registro=pedido["registro"])
+                return
+            for acao, args in (desfazer if isinstance(desfazer, dict) else {}).items():
+                if acao in ("lembrar_fato", "agendar_lembrete"):
+                    ferramentas.executar(acao, args)
+            a.trilha.marcar_desfeito(registro["id"])
+        emit("autonomia_pedido", tipo=pedido["tipo"])
+    except Exception as erro:
+        emit("autonomia_pedido_falhou", detalhe=str(erro)[:200])
+
+
 def briefing_do_dia(zeus, store, config, voz, fila_de_saida, anunciar, modelo_ok, estado):
     """Uma vez por dia, dentro da janela: texto pela fila durável, áudio depois."""
     from .briefing import chave_do_dia, coletar, escrever, ja_enviado, na_janela
@@ -248,7 +333,8 @@ def briefing_do_dia(zeus, store, config, voz, fila_de_saida, anunciar, modelo_ok
         return None
     if ja_enviado(store, chave):
         return None
-    dados = coletar(store, agora, zeus.ferramentas.tarefas, zeus.ferramentas.base)
+    dados = coletar(store, agora, zeus.ferramentas.tarefas, zeus.ferramentas.base,
+                    zeus.ferramentas.autonomia)
     texto = escrever(zeus.provedor if modelo_ok else None, zeus.persona, dados,
                      config.temperatura_conversa)
     # Fora do histórico: o texto resume mensagens de terceiros (#9).
@@ -785,6 +871,7 @@ def _executar(zeus, store, config):
         servido = f"indisponível: {erro}"
 
     operacao.atualizar('modelo', estado='pronta' if modelo_ok else 'indisponivel')
+    modelo_ok_atual = [modelo_ok]
     proxima_recuperacao = time.monotonic() + max(5, config.intervalo_recuperacao_modelo)
     estado_local = Path(store.path).parent
     voz = montar_voz(config, estado_local)
@@ -807,6 +894,8 @@ def _executar(zeus, store, config):
         do_estado(config, estado_local, avisar=avisos_de_gasto.put)
     ouvidos = montar_ouvidos(config, estado_local)
     recebidas_da_hud = CaixaDeEntrada(maxsize=32)
+    from .hud.central import Controles, volume_pelo_pipewire
+    controles = Controles(estado_local / "controles.json", aplicar_volume=volume_pelo_pipewire)
     memoria_hud = None
     hud, endereco = None, None
     chave = config.chave_hud or secrets.token_urlsafe(12)
@@ -826,14 +915,16 @@ def _executar(zeus, store, config):
             pasta_de_escuta=ouvidos.destino,
             mapa=montar_mapa(config, estado_local),
             certificado=certificado, chave_tls=chave_tls)
-        from .hud.central import Central, Controles, volume_pelo_pipewire
+        from .hud.central import Central
         gasto = None
         if config.voz_provedor == "elevenlabs" or config.escuta_provedor == "scribe":
             from .gasto_voz import do_estado
             gasto = do_estado(config, estado_local)
-        hud.central = Central(hud, controles=Controles(estado_local / "controles.json",
-                                                       aplicar_volume=volume_pelo_pipewire),
-                              gasto=gasto)
+        from .pareamento import Pareamento
+        pareamento = Pareamento(estado_local / "pareamento.json")
+        hud.central = Central(hud, autonomia=zeus.ferramentas.autonomia, pareamento=pareamento,
+                              controles=controles, gasto=gasto)
+        pareamento.ao_revogar = hud.central.revogar_aparelho
         porta = hud.iniciar()
         esquema = "https" if hud.seguro else "http"
         endereco = f"{esquema}://{endereco_local()}:{porta}/?chave={chave}"
@@ -902,6 +993,8 @@ def _executar(zeus, store, config):
         raise ValueError('Não foi possível iniciar a agenda persistente.')
     if ambiente is not None:
         ambiente.iniciar()
+    proatividade = montar_proatividade(zeus, store, config, controles, fila_de_saida, anunciar, voz,
+                                       ambiente, hud, estado_local, lambda: modelo_ok_atual[0])
     recepcao = None
     if zeus.canal is not None:
         def criar_receptor():
@@ -1012,6 +1105,11 @@ def _executar(zeus, store, config):
                 except queue.Empty:
                     break
                 geracao = fala.invalidar() if fala else 0
+                if proatividade is not None and pedido.get("tipo") in ("texto", "audio", "telegram", "ambiente"):
+                    proatividade.nicolas_apareceu()
+                if pedido.get("tipo") in ("objetivo_estado", "desfazer") and zeus.ferramentas.autonomia:
+                    tratar_pedido_de_autonomia(pedido, zeus.ferramentas, emit)
+                    continue
                 if hud is not None:
                     hud.publicar("situacao", estado="pensando", detalhe="recebido", geracao=geracao)
                 zeus.capacidades = {"voz": voz.disponivel(), "ouvidos": ouvidos.disponivel(),
@@ -1123,6 +1221,13 @@ def _executar(zeus, store, config):
             try:
                 for aviso in vigia_hardware.avaliar(saude_local.medir()):
                     emit("hardware_alerta", detalhe=aviso)
+                    if proatividade is not None:
+                        from .iniciativa import Aviso
+                        normalizou = aviso.startswith("Normalizou")
+                        proatividade.comunicar(Aviso(f"hardware:{time.time_ns()}", aviso,
+                                                     urgencia=0.3 if normalizou else 0.75,
+                                                     utilidade=0.5 if normalizou else 0.85))
+                        continue
                     anunciar("zeus", aviso)
                     if zeus.canal is not None:
                         fila_de_saida.preparar(f"hardware:{time.time_ns()}", zeus.canal.nome,
@@ -1138,6 +1243,12 @@ def _executar(zeus, store, config):
                                 modelo_ok, estado_local)
             except Exception as erro:
                 emit("briefing_falhou", detalhe=str(erro)[:200])
+        modelo_ok_atual[0] = modelo_ok
+        if proatividade is not None:
+            try:
+                proatividade.tick(modelo_ok, config.motor_intervalo_s)
+            except Exception as erro:
+                emit("proatividade_falhou", detalhe=str(erro)[:200])
         while not avisos_de_gasto.empty():
             aviso = avisos_de_gasto.get()
             emit("voz_teto_80", detalhe=aviso)

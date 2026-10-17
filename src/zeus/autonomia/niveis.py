@@ -47,6 +47,12 @@ L, F, P = Nivel.LIVRE, Nivel.FAZ_E_AVISA, Nivel.PEDE_ANTES
 CATALOGO_DE_NIVEIS = {
     # Leitura, busca e rascunho: nada muda fora do Zeus.
     "consultar_fato": RegraDeNivel(L),
+    # Objetivos (#85): ler é livre; criar e responder só mexem no banco da
+    # autonomia e são pedidos do próprio Nicolas na conversa.
+    "listar_objetivos": RegraDeNivel(L),
+    "o_que_fiz": RegraDeNivel(L),
+    "criar_objetivo": RegraDeNivel(F, reversivel_com="abandonar o objetivo pela Central"),
+    "responder_objetivo": RegraDeNivel(F, reversivel_com="responder de novo ao objetivo"),
     "listar_pendencias": RegraDeNivel(L),
     "pesquisar": RegraDeNivel(L),
     "ler_pagina": RegraDeNivel(L),

@@ -97,6 +97,11 @@ class Config:
     briefing_hora: str = ""
     briefing_janela_horas: int = 3
     briefing_audio: bool = True
+    # Autonomia (#85) e proatividade (#86): objetivos que andam sozinhos, caixa
+    # de aprovações por código e política de interrupção. Desligada por padrão.
+    autonomia_ativa: bool = False
+    motor_intervalo_s: int = 20
+    fechamento_hora: str = ""
     # Vigia de hardware (#76): avisa no grupo (e na sala, com a escuta no
     # ambiente ligada) quando o X99 passa dos limites por 3 leituras seguidas.
     hardware_vigia: bool = False

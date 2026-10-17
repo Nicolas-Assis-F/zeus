@@ -63,6 +63,7 @@ class Zeus:
                                               ferramentas.pesquisa.disponivel())}
         self.relogio = relogio or (lambda: datetime.now(timezone.utc))
         self.ao_afirmacao_vazia = None
+        self.ao_decidir_aprovacao = None
 
     # ------------------------------------------------------------ contexto
     def _sistema(self, mensagem: str = ""):
@@ -170,6 +171,16 @@ class Zeus:
         self.ferramentas.inicio_do_turno = agora
         self.ferramentas.mensagem_do_turno = texto
         respondida = self._vincular_resposta(texto, agora)
+        # "ok 4821" decide uma aprovação da autonomia (#85) sem passar pelo
+        # modelo: o código é do servidor, e quem decide é o canal do Nicolas.
+        decidida = None if respondida else (self._decidir_aprovacao(texto, canal)
+                                            or self._feedback_de_aviso(texto, canal))
+        if decidida is not None:
+            self.store.registrar_turno(canal, "nicolas", texto, agora)
+            self.store.registrar_turno(canal, "zeus", decidida, self.relogio())
+            if ao_receber is not None:
+                ao_receber(decidida)
+            return decidida
         # Comandos inequívocos confirmam registros já preparados sem consultar
         # um modelo pago para decidir outra vez o que Nicolas acabou de decidir.
         from .secretaria import executar_atalho
@@ -281,6 +292,52 @@ class Zeus:
             ao_receber(None)  # a limpeza mexeu no texto; a tela precisa do final
         self.store.registrar_turno(canal, "zeus", final, self.relogio())
         return final
+
+    def _decidir_aprovacao(self, texto: str, canal: str):
+        autonomia = getattr(self.ferramentas, "autonomia", None)
+        if autonomia is None:
+            return None
+        from .autonomia import interpretar_resposta
+        limpo = str(texto).replace("[áudio de Nicolas, transcrito]", "").strip()
+        pares = interpretar_resposta(limpo)
+        if not pares:
+            return None
+        linhas = []
+        for codigo, aprovar in pares:
+            r = autonomia.aprovacoes.decidir(codigo, aprovar, por="nicolas", canal=canal)
+            ap = r.get("aprovacao") or {}
+            alvo = f"{ap.get('acao', '?')} → {ap.get('alvo', '?')}"
+            if r.get("ok") and not r.get("repetida"):
+                linhas.append(f"{'Aprovado' if aprovar else 'Negado'}: {alvo} (código {codigo})."
+                              + (" Sigo agora." if aprovar else " Não faço."))
+            elif r.get("repetida"):
+                linhas.append(f"O código {codigo} já estava decidido: {ap.get('estado', '?')}.")
+            else:
+                linhas.append(f"O código {codigo} não está pendente ({r.get('motivo') or 'não existe'}).")
+        if self.ao_decidir_aprovacao is not None:
+            self.ao_decidir_aprovacao()
+        return "\n".join(linhas)
+
+    FEEDBACK = {"util": "util", "foi util": "util", "nao precisava": "nao_precisava",
+                "nao precisava avisar": "nao_precisava", "mais tarde": "mais_tarde"}
+
+    def _feedback_de_aviso(self, texto: str, canal: str):
+        """"útil", "não precisava" ou "mais tarde" logo depois de um aviso ajusta
+        a política de interrupção (#86). Reversível pela autonomia."""
+        autonomia = getattr(self.ferramentas, "autonomia", None)
+        if autonomia is None:
+            return None
+        import unicodedata
+        normal = "".join(c for c in unicodedata.normalize("NFD", str(texto).lower())
+                         if unicodedata.category(c) != "Mn").strip(" .!")
+        tipo = self.FEEDBACK.get(normal)
+        chave = self.store.kv_get("ultimo_aviso_chave") if tipo else None
+        if not chave:
+            return None
+        autonomia.feedback.registrar(chave, tipo, canal)
+        return {"util": "Anotado: esse tipo de aviso vale a pena.",
+                "nao_precisava": "Anotado: vou interromper menos com esse tipo de aviso.",
+                "mais_tarde": "Anotado: esse tipo de aviso pode esperar o resumo."}[tipo]
 
     def _vincular_resposta(self, texto: str, agora):
         """A resposta pertence ao episódio da pergunta, não a uma conversa solta."""
