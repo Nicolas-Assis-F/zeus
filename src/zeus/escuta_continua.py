@@ -436,6 +436,15 @@ class EscutaContinua:
         except queue.Empty:
             return "Isto está demorando mais do que devia, senhor. Mando por escrito quando terminar."
 
+    def anunciar(self, texto) -> bool:
+        """Fala por iniciativa própria (alerta), só se ninguém está conversando:
+        escuta dormindo e alto-falante livre. Não bloqueia quem chamou."""
+        if self.estado != self.DORMINDO or not self.guarda.aberto():
+            return False
+        threading.Thread(target=self._falar, args=(texto,), daemon=True,
+                         name="zeus-anuncio").start()
+        return True
+
     def _falar(self, texto):
         dito = para_fala(texto)
         if not dito or not self.voz.disponivel():

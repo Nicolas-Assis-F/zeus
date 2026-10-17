@@ -744,6 +744,16 @@ def _executar(zeus, store, config):
     # durável aqui, no laço principal, que é dono da conexão com o banco.
     avisos_de_gasto = queue.SimpleQueue()
     proximo_briefing = 0.0
+    vigia_hardware, saude_local, proxima_leitura = None, None, 0.0
+    if config.hardware_vigia:
+        from .saude import Saude
+        from .vigia_hardware import VigiaDeHardware
+        saude_local = Saude(estado_local)
+        vigia_hardware = VigiaDeHardware({
+            "cpu_celsius": config.hardware_cpu_celsius,
+            "gpu_celsius": config.hardware_gpu_celsius,
+            "ram_pct": config.hardware_ram_pct,
+            "disco_livre_pct": config.hardware_disco_livre_pct})
     if config.voz_provedor == "elevenlabs" or config.escuta_provedor == "scribe":
         from .gasto_voz import do_estado
         do_estado(config, estado_local, avisar=avisos_de_gasto.put)
@@ -1038,6 +1048,19 @@ def _executar(zeus, store, config):
                 hud.publicar("mensagem", de="sistema",
                              texto="Não consegui concluir esta resposta. Pode tentar novamente.")
             stopped.wait(0.5)
+        if vigia_hardware is not None and time.monotonic() >= proxima_leitura:
+            proxima_leitura = time.monotonic() + 30
+            try:
+                for aviso in vigia_hardware.avaliar(saude_local.medir()):
+                    emit("hardware_alerta", detalhe=aviso)
+                    anunciar("zeus", aviso)
+                    if zeus.canal is not None:
+                        fila_de_saida.preparar(f"hardware:{time.time_ns()}", zeus.canal.nome,
+                                               aviso, tipo="aviso")
+                    if ambiente is not None:
+                        ambiente.anunciar(aviso)
+            except Exception as erro:
+                emit("hardware_falhou", detalhe=str(erro)[:200])
         if config.briefing_hora and zeus.canal is not None and time.monotonic() >= proximo_briefing:
             proximo_briefing = time.monotonic() + 60
             try:
