@@ -99,7 +99,10 @@ class Midia:
         dados = leitura.midia(str(mensagem), chat)
         if dados is None:
             raise MidiaIndisponivel(f"Não achei a mensagem {mensagem} com mídia.")
-        chave = hashlib.sha256(f"{origem}\0{dados['chat']}\0{dados['id']}".encode()).hexdigest()
+        identidade = f"v2\0{origem}\0{dados['chat']}\0{dados['id']}"
+        if dados["tipo"] in ("audio", "video") and hasattr(self.ouvidos, "assinatura"):
+            identidade += "\0" + json.dumps(self.ouvidos.assinatura(), ensure_ascii=False)
+        chave = hashlib.sha256(identidade.encode()).hexdigest()
         guardado = self._do_cache(chave)
         if guardado is not None:
             return guardado
@@ -163,6 +166,12 @@ class Midia:
         if status != 200 or not resposta.get("success") or not caminho.is_file():
             raise MidiaIndisponivel("A ponte não conseguiu baixar: " +
                                     str(resposta.get("message") or status)[:200])
+        if caminho.stat().st_size > self.maximo_bytes:
+            raise MidiaIndisponivel("O arquivo baixado excede o limite de tamanho.")
+        esperado = dados.get("sha256")
+        if esperado and hashlib.sha256(caminho.read_bytes()).hexdigest() != esperado:
+            raise MidiaIndisponivel("A ponte devolveu arquivo de outra mensagem ou corrompido; "
+                                    "atualize a ponte de mídia. Não usei esse conteúdo.")
         return caminho
 
     # ------------------------------------------------------------- tipos
@@ -247,7 +256,9 @@ def montar_midia(config, estado):
                "principal": (config.principal_ponte_url, config.principal_banco)}
     if not any(url and banco for url, banco in origens.values()):
         return None
-    chave = (config.escuta_modelo, config.escuta_computo, config.midia_threads)
+    chave = (config.escuta_modelo, config.escuta_computo, config.midia_threads,
+             config.escuta_idioma, config.escuta_beam, config.escuta_silencio_ms,
+             config.escuta_vocabulario, config.midia_audio_segundos, str(estado))
     if chave not in _OUVIDOS:
         from .ouvidos import Ouvidos
         _OUVIDOS[chave] = Ouvidos(config.escuta_modelo, config.escuta_computo,
@@ -263,5 +274,9 @@ def montar_midia(config, estado):
     if config.openrouter_chave and modelo and config.provedor in ("openrouter", "hibrido"):
         from .llm import ProvedorOpenRouter
         visao = ProvedorOpenRouter(config.openrouter_url, modelo, config.openrouter_chave)
-    return Midia(origens, Path(estado) / "midia", _OUVIDOS[chave], visao,
+    ouvidos = _OUVIDOS[chave]
+    if config.escuta_scribe_midia:
+        from .ouvidos import com_escuta_remota
+        ouvidos = com_escuta_remota(config, estado, ouvidos)
+    return Midia(origens, Path(estado) / "midia", ouvidos, visao,
                  maximo_bytes=config.midia_max_mb * 1024 * 1024)

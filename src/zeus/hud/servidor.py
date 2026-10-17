@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 from ..mapa import MapaIndisponivel
 from ..saude import Saude
+from .central import atender
 
 PAGINA = Path(__file__).resolve().parent / "index.html"
 LIMITE_DE_MENSAGEM = 4000
@@ -74,6 +75,14 @@ def garantir_certificado(diretorio: Path, ip: str = ""):
     return certificado, chave
 
 
+class _ServidorHTTP(ThreadingHTTPServer):
+    # O padrão do http.server é 5 conexões na fila do listen: com PC, celular e
+    # fluxos SSE abertos, a sexta conexão simultânea era recusada (visto no
+    # teste de 100 envios concorrentes da Central, #84).
+    request_queue_size = 128
+    daemon_threads = True
+
+
 class ServidorHUD:
     def __init__(self, enfileirar, voz=None, chave: str = "",
                  host: str = "0.0.0.0", porta: int = 8770, estado=None,
@@ -101,6 +110,8 @@ class ServidorHUD:
         self.porta = porta
         self.assinantes = []
         self.trava = threading.Lock()
+        # A Central (#84) recebe tudo que a HUD difunde e responde por /central.
+        self.central = None
         self._servidor = None
         self._thread = None
 
@@ -121,6 +132,8 @@ class ServidorHUD:
 
     # ------------------------------------------------------------- difusão
     def publicar(self, tipo: str = "estado", **campos):
+        if self.central is not None:
+            self.central.publicar(tipo, **campos)
         pacote = json.dumps({"tipo": tipo, **campos}, ensure_ascii=False)
         with self.trava:
             alvos = list(self.assinantes)
@@ -150,8 +163,7 @@ class ServidorHUD:
         return bool(self.certificado and self.chave_tls)
 
     def iniciar(self):
-        servidor = ThreadingHTTPServer((self.host, self.porta), _construir(self))
-        servidor.daemon_threads = True
+        servidor = _ServidorHTTP((self.host, self.porta), _construir(self))
         if self.seguro:
             contexto = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             contexto.load_cert_chain(str(self.certificado), str(self.chave_tls))
@@ -220,6 +232,8 @@ def _construir(hud: ServidorHUD):
 
         # ----------------------------------------------------------- rotas
         def do_GET(self):
+            if hud.central is not None and atender(self, hud.central, "GET"):
+                return
             caminho = urlparse(self.path).path
             if caminho in ("/", "/index.html"):
                 # A página em si não é segredo: ela só pede a chave e, sem uma
@@ -250,11 +264,15 @@ def _construir(hud: ServidorHUD):
             return self._json(404, {"erro": "rota desconhecida"})
 
         def do_POST(self):
+            if hud.central is not None and atender(self, hud.central, "POST"):
+                return
             caminho = urlparse(self.path).path
             if not hud.autorizado(self._chave()):
                 return self._json(401, {"erro": "chave inválida"})
             if caminho == "/escuta":
                 return self._escuta()
+            if caminho == "/memoria":
+                return self._memoria()
             if caminho != "/mensagem":
                 return self._json(404, {"erro": "rota desconhecida"})
             tamanho = self._tamanho(LIMITE_DE_MENSAGEM)
@@ -270,6 +288,23 @@ def _construir(hud: ServidorHUD):
             if not texto:
                 return self._json(400, {"erro": "mensagem vazia"})
             return self._enfileirar({"tipo": "texto", "texto": texto[:LIMITE_DE_MENSAGEM]})
+
+        def _memoria(self):
+            """Esquecer ou desfazer um fato (#79). Só enfileira: o banco é do
+            laço principal."""
+            tamanho = self._tamanho(LIMITE_DE_MENSAGEM)
+            if tamanho is None:
+                return
+            try:
+                dados = json.loads(self.rfile.read(tamanho) or b"{}")
+                acao, fato = dados.get("acao"), dados.get("fato")
+                if acao not in ("esquecer", "desfazer") or not isinstance(fato, str):
+                    raise ValueError
+            except (ValueError, UnicodeDecodeError, AttributeError):
+                return self._json(400, {"erro": "corpo inválido"})
+            if not fato.strip():
+                return self._json(400, {"erro": "fato vazio"})
+            return self._enfileirar({"tipo": "memoria", "acao": acao, "fato": fato[:200]})
 
         def _escuta(self):
             if hud.pasta_de_escuta is None:

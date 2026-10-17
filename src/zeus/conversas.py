@@ -140,13 +140,15 @@ class LeitorDeConversas:
         return [(jid, nome) for jid, nome in linhas if casa(busca, nome)]
 
     # ------------------------------------------------------------- ler
-    def ler(self, busca: str, quantidade=PADRAO) -> dict:
+    def ler(self, busca: str, quantidade=PADRAO, antes_de: str = "") -> dict:
         try:
             quantidade = max(1, min(MAXIMO, int(quantidade or PADRAO)))
         except (TypeError, ValueError):
             quantidade = PADRAO
         jid, nome = self.achar(busca)
-        mensagens = self.leitura.conversa(self._jids(jid), quantidade)
+        lote = self.leitura.conversa(self._jids(jid), quantidade + 1, antes_de)
+        tem_mais = len(lote) > quantidade
+        mensagens = lote[-quantidade:]
         if self.midia is not None:
             # Só os áudios mais recentes são transcritos aqui: cada um leva
             # segundos. Os outros, e toda outra mídia, levam o id para ler_midia.
@@ -158,4 +160,10 @@ class LeitorDeConversas:
         linhas = [{"quando": m["em"].astimezone(BRASILIA).strftime("%d/%m %H:%M"),
                    "quem": "Nicolas" if m["meu"] else nome,
                    "texto": m["texto"]} for m in mensagens]
-        return {"contato": nome, "mensagens": linhas, "total": len(linhas)}
+        return {"contato": nome, "mensagens": linhas, "total": len(linhas),
+                "tem_mais": tem_mais,
+                "proximo_cursor": str(mensagens[0]["linha"]) if tem_mais else None,
+                "alcance": "Trecho do histórico; há mensagens anteriores. Continue com proximo_cursor."
+                if tem_mais else "Início do histórico disponível atingido.",
+                "midias": [{"mensagem": m["id"], "chat": m["chat"], "origem": "principal"}
+                           for m in mensagens if m["midia"]]}

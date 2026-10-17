@@ -9,7 +9,9 @@ que perguntar de novo.
 import re
 from datetime import datetime, timedelta, timezone
 
-RELATIVO = re.compile(r"^\+(\d+)\s*(m|min|minutos?|h|horas?|d|dias?)$", re.IGNORECASE)
+RELATIVO = re.compile(
+    r"^(?:\+|(?:daqui(?:\s+a)?|em)\s+)(\d+)\s*(m|min|minutos?|h|horas?|d|dias?)$",
+    re.IGNORECASE)
 RELOGIO = re.compile(r"^(?:(hoje|amanh[ãa])\s+)?([01]?\d|2[0-3])[:h]([0-5]\d)$", re.IGNORECASE)
 
 

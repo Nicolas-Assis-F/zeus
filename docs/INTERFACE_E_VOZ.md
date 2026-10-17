@@ -60,6 +60,101 @@ A síntese acontece no servidor e o navegador toca o WAV. Cada frase vira um
 arquivo com nome derivado do texto, então repetir uma frase não sintetiza de
 novo.
 
+## Voz natural: ElevenLabs pelo OpenRouter (#68)
+
+O Piper resolve, mas soa como máquina. A ElevenLabs soa como gente, e o
+OpenRouter a serve no mesmo endpoint e com a mesma chave do modelo, então não
+há conta nova nem dependência: só `urllib`.
+
+```json
+"voz_provedor": "elevenlabs",
+"voz_eleven_voz": "brian",
+"escuta_provedor": "scribe"
+```
+
+- **Conversa** usa o `eleven-v4-turbo`. **Briefing** e textos acima de
+  `voz_caprichada_acima` (400 caracteres) usam o `eleven-v4`, que aceita
+  tags de emoção inline como `[warmly]` e `[calmly]`.
+- **A voz** é um nome da lista do OpenRouter (brian, george, daniel, liam,
+  adam, chris…) ou um `voice_id` da Voice Library da ElevenLabs.
+- **A reserva é automática.** Sem rede, sem chave, sem saldo ou com o teto
+  estourado, a fala cai para o Piper e a escuta para o faster-whisper. A troca
+  sai no log como `voz_origem` e `escuta_origem`, com o motivo. Depois de uma
+  falha, o provedor remoto fica de lado por um tempo que depende do erro: rede
+  60 s, servidor 2 min, 429 5 min, saldo 1 h, chave recusada 6 h. Assim o Zeus
+  não paga a espera de rede a cada frase.
+- **Teto diário.** O teto vale para `voz_teto_caracteres_dia` e
+  `escuta_teto_segundos_dia`. O contador fica em `~/.local/state/zeus/voz-gasto.json`
+  e zera à meia-noite. Aos 80% o Zeus avisa no canal, uma vez por dia. Teto
+  zero desliga a voz remota.
+- **Áudio no WhatsApp.** Quando Nicolas manda áudio no grupo, a resposta vai
+  em texto e também como nota de voz (ogg/opus pelo ffmpeg). Para desligar,
+  use `voz_resposta_em_audio: false`.
+- **Mídia de terceiros.** `escuta_scribe_midia` vem desligado. A mídia do
+  WhatsApp inclui áudio de clientes e do Henrique, e ligar isso manda essas
+  vozes para a ElevenLabs. O texto delas já vai ao modelo remoto, mas a voz é
+  um dado a mais, então a decisão fica com Nicolas.
+
+Medido no X99 em 17/10/2026:
+
+| | Remoto | Local |
+|---|---|---|
+| Fala de 5 s (Turbo × Piper) | 1,6–2,1 s até o primeiro byte | 2,4 s |
+| Transcrição de 7 s (Scribe × large-v3 na CPU) | 0,75–0,82 s | 19,6 s, com a carga do modelo |
+
+O endpoint devolve o PCM quase de uma vez, entre 0,05 e 0,4 s depois do
+primeiro byte. Tocar em fluxo economizaria pouco, então o ganho de verdade
+está em começar a falar antes de a resposta inteira do modelo ficar pronta
+(#36).
+
+Preço com o desconto de lançamento, que vai até 19/10/2026: Turbo
+US$ 20/M caracteres, v4 US$ 40/M, Scribe US$ 0,11/h. Depois disso, o dobro.
+O `usd_estimado` do contador usa o preço cheio.
+
+## Escuta no ambiente: "Hey Jarvis" pelo microfone da casa (#68)
+
+Com `escuta_ambiente: true`, o Zeus ouve pelo microfone do próprio X99 (a
+webcam) e responde no alto-falante, sem navegador aberto.
+
+1. **Dormindo**, só a palavra de ativação (openwakeword, local) escuta. Nenhum
+   áudio sai da máquina.
+2. **Ouvindo**, grava até a fala acabar: `escuta_fim_silencio_ms` de silêncio
+   contra o piso de ruído da sala.
+3. **Respondendo**, transcreve (Scribe, ou faster-whisper de reserva), entrega
+   ao núcleo pelo mesmo caminho da HUD e fala a resposta. Se a resposta passar
+   de `escuta_reconhecimento_apos_s`, toca na hora `escuta_reconhecimento`
+   ("Deixa comigo, senhor.", já sintetizada e em cache).
+4. Depois de responder, ouve por mais `escuta_continuacao_s` sem exigir a
+   palavra, para emendar.
+
+**Guarda de eco.** Enquanto o alto-falante toca, mais a latência e 250 ms de
+cauda, o microfone é descartado, e o Zeus não responde à própria voz. Falar
+por cima do Zeus não o interrompe; isso fica para a #36.
+
+**Extras opcionais.** O `pw-record`/`pw-play` vem do PipeWire. Já o
+`openwakeword`, o `numpy` e o `onnxruntime` são pacotes Python. Sem eles, o
+`escuta_ambiente` no log do `run` diz o que falta, e o resto do Zeus sobe normal.
+
+```bash
+pip install --user --break-system-packages --no-deps openwakeword
+pip install --user --break-system-packages scipy scikit-learn tqdm requests
+python3 -c "from openwakeword.utils import download_models; download_models(['hey_jarvis'])"
+```
+
+A palavra de partida é `hey_jarvis`. Um modelo treinado para "Zeus" entra pelo
+caminho do `.onnx` em `escuta_palavra`. A transcrição corrige "Deus" e "seus"
+para "Zeus" quando estão em posição de chamado, e descarta as frases que o
+Whisper inventa no silêncio ("Legendas pela comunidade Amara.org").
+
+Medido no X99, com a cadeia real e o microfone trocado pelo arquivo:
+
+| Etapa | Tempo |
+|---|---|
+| Palavra detectada | ainda durante a frase |
+| Fim de fala + transcrição (Scribe) | 1,3 s depois do fim da frase |
+| "Deixa comigo, senhor." no alto-falante | 2,8 s |
+| Palavra de ativação na CPU | ~4% de um núcleo |
+
 ## Ouvidos: faster-whisper, no próprio X99
 
 O microfone é o do aparelho que abre a interface. O navegador grava, manda o
@@ -247,3 +342,65 @@ As pendências (perguntas, agenda, entregas, memória, operação) ficam em abas
 com contador, em vez de empilhadas numa lista só.
 
 Abaixo de 980 px a página vira três vistas — Conversa, Saúde e Mapa — no celular.
+
+## Briefing da manhã (#74)
+
+```json
+"briefing_hora": "07:30",
+"briefing_janela_horas": 3,
+"briefing_audio": true
+```
+
+Uma vez por dia, entre `briefing_hora` e o fim da janela, o Zeus manda no
+grupo um bom-dia com:
+
+- a agenda de hoje e o que está atrasado;
+- as perguntas em aberto;
+- os avisos do vigia nas últimas 24 horas;
+- as tarefas de código vivas;
+- as pendências da base.
+
+O texto vai pela fila durável (chave `briefing:AAAA-MM-DD`, então reiniciar
+não duplica). A nota de voz sai logo depois, na voz caprichada (Eleven v4).
+Se a máquina estava desligada na janela, o briefing do dia não sai.
+
+É escrito **sem ferramentas** e fica fora do histórico da conversa, porque os
+avisos trazem texto de terceiro (#9). Sem modelo, sai uma versão seca, só com
+os fatos. Para conferir sem enviar nada:
+
+```bash
+./zeus briefing          # o texto de hoje
+./zeus briefing --dados  # e o que foi coletado
+```
+
+## Vigia de hardware (#76)
+
+```json
+"hardware_vigia": true,
+"hardware_cpu_celsius": 85,
+"hardware_gpu_celsius": 85,
+"hardware_ram_pct": 92,
+"hardware_disco_livre_pct": 10
+```
+
+A cada 30 s, o Zeus lê o mesmo retrato do painel de saúde e compara com os
+limites. Também vigia a VRAM (98%) e a swap (50%), com limites fixos. O alerta
+exige 3 leituras seguidas, e depois a mesma medida fica 30 min quieta. O
+"Normalizou" só vem abaixo do limite menos a margem (5 °C ou 5%).
+
+O alerta vai para o grupo pela fila durável e, com a escuta no ambiente
+ligada, também é falado na sala. A fala só acontece com a escuta dormindo e o
+alto-falante livre, então ele nunca fala por cima de uma conversa. Medida que
+a máquina não informa (potência de GeForce, por exemplo) não vira zero nem
+alerta.
+
+## Esquecer pela HUD (#79)
+
+Na aba Memória, cada fato tem um botão **esquecer**. O fato sai na hora, e a
+conversa mostra "Esqueci «chave»" com um botão **desfazer**, que vale por 5
+minutos. O desfazer restaura exatamente o que foi apagado (valor, origem e
+estado). A HUD nunca escreve um fato novo. Cada esquecimento e cada
+restauração viram episódio (`memoria_esquecida` e `memoria_restaurada`).
+
+Como o `forget` do terminal, isto tira o fato da memória ativa. Não apaga
+cópias de segurança anteriores.

@@ -1,0 +1,11 @@
+[Unit]
+Description=Vigia do Zeus: checagem de saúde e aviso no grupo (#70)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/zeus
+Environment=PYTHONPATH=%h/zeus/src
+ExecStart=/usr/bin/python3 -m zeus.vigia_servico --repo %h/zeus
+TimeoutStartSec=180
+UMask=0077
+NoNewPrivileges=true

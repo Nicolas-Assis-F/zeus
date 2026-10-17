@@ -30,6 +30,11 @@ class Config:
     # e custa uma chamada a mais quando não há ferramenta a usar. A visão
     # descreve foto e vídeo recebidos.
     modelo_ferramentas: str = ""
+    # Escada de modelos (#72): degraus de reserva depois do provedor acima,
+    # como "openrouter:anthropic/claude-haiku-5.5" ou "ollama:llama3.1:8b-...".
+    # Vazio é sem escada. O timeout vale para os degraus remotos.
+    escada_reserva: tuple = ()
+    escada_timeout_s: int = 60
     modelo_visao: str = ""
     keep_alive: str = "30m"
     limite_de_resposta: int = 320
@@ -69,6 +74,54 @@ class Config:
     chave_hud: str = ""
     voz_binario: str = "piper"
     voz_modelo: str = ""
+    # Voz e escuta remotas pela ElevenLabs no OpenRouter (#68), com a mesma
+    # `openrouter_chave`. "piper"/"local" mantêm tudo em casa. A voz é um nome
+    # da lista do OpenRouter (brian, george...) ou um voice_id da Voice Library.
+    voz_provedor: str = "piper"
+    voz_eleven_modelo: str = "elevenlabs/eleven-v4-turbo"
+    voz_eleven_modelo_caprichado: str = "elevenlabs/eleven-v4"
+    voz_eleven_voz: str = "brian"
+    voz_caprichada_acima: int = 400
+    # Teto diário; passou, cai para o local até a meia-noite. Aviso aos 80%.
+    voz_teto_caracteres_dia: int = 60000
+    escuta_teto_segundos_dia: int = 3600
+    # Áudio de Nicolas no WhatsApp volta também como nota de voz.
+    voz_resposta_em_audio: bool = True
+    escuta_provedor: str = "local"
+    escuta_scribe_modelo: str = "elevenlabs/scribe-v2"
+    # Mídia do WhatsApp inclui áudio de terceiros (clientes, Henrique). Ligar
+    # manda essas vozes ao Scribe; o texto delas já vai ao modelo remoto.
+    escuta_scribe_midia: bool = False
+    # Briefing da manhã (#74): "07:30" liga; vazio desliga. Só sai dentro da
+    # janela depois da hora, uma vez por dia, em texto e (se houver voz) áudio.
+    briefing_hora: str = ""
+    briefing_janela_horas: int = 3
+    briefing_audio: bool = True
+    # Autonomia (#85) e proatividade (#86): objetivos que andam sozinhos, caixa
+    # de aprovações por código e política de interrupção. Desligada por padrão.
+    autonomia_ativa: bool = False
+    motor_intervalo_s: int = 20
+    fechamento_hora: str = ""
+    # Vigia de hardware (#76): avisa no grupo (e na sala, com a escuta no
+    # ambiente ligada) quando o X99 passa dos limites por 3 leituras seguidas.
+    hardware_vigia: bool = False
+    hardware_cpu_celsius: int = 85
+    hardware_gpu_celsius: int = 85
+    hardware_ram_pct: int = 92
+    hardware_disco_livre_pct: int = 10
+    # Escuta no ambiente, pelo microfone da própria máquina (#68). Desligada
+    # por padrão: microfone ouvindo a casa é decisão de Nicolas. Fonte e saída
+    # são nomes de nó do PipeWire (`wpctl status`); vazio é o padrão do sistema.
+    escuta_ambiente: bool = False
+    escuta_ambiente_fonte: str = ""
+    escuta_ambiente_saida: str = ""
+    escuta_palavra: str = "hey_jarvis"
+    escuta_palavra_limiar: float = 0.5
+    escuta_fim_silencio_ms: int = 800
+    escuta_continuacao_s: float = 6.0
+    escuta_reconhecimento: str = "Deixa comigo, senhor."
+    escuta_reconhecimento_apos_s: float = 1.5
+    escuta_ao_acordar: str = ""
     hud_tls: bool = True
     escuta_modelo: str = "small"
     escuta_computo: str = "int8"
@@ -91,6 +144,9 @@ class Config:
     temperatura_conversa: float = 0.75
     temperatura_decisao: float = 0.0
     turnos_de_conversa: int = 12
+    # Só abrevia respostas antigas do assistente no prompt. Registros e falas
+    # do dono permanecem íntegros; pedidos em foco vêm dos dados estruturados.
+    historico_resposta_caracteres: int = 2000
     teto_de_contexto: int = 600
     intervalo_agenda: int = 30
     atraso_maximo_lembrete: int = 86400
@@ -121,6 +177,9 @@ class Config:
     # viram aviso no grupo, e Nicolas libera ou bloqueia o contato.
     principal_crm: str = ""
     principal_ponte_url: str = "http://127.0.0.1:8080"
+    # Habilitado por Nicolas para atuar como secretário no número principal.
+    # O executor ainda exige comando de envio e registra resultado incerto.
+    principal_envio_ativo: bool = False
     # Mídia do WhatsApp (#60): teto antes de baixar, duração máxima de áudio
     # (o microfone da HUD tem o dele) e threads da transcrição. A visão usa
     # `modelo_visao`, ou o próprio modelo do OpenRouter.
@@ -132,6 +191,10 @@ class Config:
     orcamentos_pasta: str = "~/.local/share/zeus/orcamentos"
     # Repasse para o Claude Code do X99 (#64): `nome=caminho` de cada
     # repositório, limite de tempo e de gasto por tarefa. Vazio desliga.
+    documentos_pasta: str = "~/.local/share/zeus/documentos"
+    tarefas_orca_bin: str = "/home/zeus/.local/bin/orca-ide"
+    tarefas_agentes: tuple = ("codex", "claude")
+    tarefas_coordenador: str = ""
     tarefas_projetos: tuple = ()
     tarefas_pasta: str = "~/.local/share/zeus/tarefas"
     tarefas_minutos: int = 45

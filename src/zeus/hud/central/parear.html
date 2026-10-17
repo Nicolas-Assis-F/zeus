@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Zeus — Parear aparelho</title>
+<link rel="stylesheet" href="/central/central.css">
+</head>
+<body style="display:grid;place-items:center;padding:16px">
+<main style="width:min(380px,100%);display:grid;gap:14px;text-align:center">
+  <h1 style="letter-spacing:.3em;font-size:20px;margin:0">ZEUS</h1>
+  <p id="msg">Preparando o pareamento…</p>
+  <p class="mono" id="codigo" style="font-size:34px;letter-spacing:.3em;margin:0" hidden></p>
+  <form id="manual" hidden style="display:grid;gap:10px">
+    <label for="cod">Código de 8 dígitos mostrado no PC</label>
+    <input id="cod" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" required>
+    <label for="nome">Nome deste aparelho</label>
+    <input id="nome" value="Celular do Nicolas" maxlength="60">
+    <button class="bt pri" type="submit">Parear</button>
+  </form>
+  <p class="erro-txt" id="erro" role="alert"></p>
+</main>
+<script type="module" src="/central/js/parear.js"></script>
+</body>
+</html>

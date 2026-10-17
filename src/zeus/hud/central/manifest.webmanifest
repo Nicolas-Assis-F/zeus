@@ -1,0 +1,11 @@
+{
+  "name": "Zeus — Central",
+  "short_name": "Zeus",
+  "start_url": "/central/#hoje",
+  "scope": "/central/",
+  "display": "standalone",
+  "background_color": "#060a10",
+  "theme_color": "#060a10",
+  "lang": "pt-BR",
+  "icons": [{"src": "/central/icone.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}]
+}

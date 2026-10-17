@@ -7,6 +7,7 @@ disso: sem visão, sem telefonia, sem dispositivo doméstico.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import queue
@@ -22,7 +23,9 @@ from . import __version__
 from .acoes import Acoes
 from .base import Base
 from .orcamento import Orcamentos
-from .tarefas import Tarefas, projetos
+from .tarefas import projetos
+from .tarefas_orca import TarefasOrca
+from .documentos import Documentos
 from .mapa import Mapa
 from .saudacao import compor as compor_saudacao
 from .saudacao import identificador_de_boot
@@ -35,7 +38,7 @@ from .llm import ErroDeModelo, contabilizar, criar_provedor, uso_da_chave
 from .nucleo import Zeus
 from .persona import Persona
 from .pesquisa import Pesquisa
-from .ouvidos import Ouvidos
+from .ouvidos import Ouvidos, com_escuta_remota
 from .store import Store
 from .voz import Voz
 
@@ -77,7 +80,9 @@ def montar_tarefas(config):
     repositorios = projetos(config.tarefas_projetos)
     if not repositorios:
         return None
-    return Tarefas(config.tarefas_pasta, repositorios, limite_minutos=config.tarefas_minutos,
+    return TarefasOrca(config.tarefas_pasta, repositorios, limite_minutos=config.tarefas_minutos,
+                   orca=config.tarefas_orca_bin, agentes=config.tarefas_agentes,
+                   coordenador=config.tarefas_coordenador,
                    orcamento_usd=config.tarefas_usd, base=config.base_conhecimento)
 
 
@@ -97,14 +102,21 @@ def montar(args):
     pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
     from .midia import montar_midia
     midia = montar_midia(config, args.state_dir.expanduser())
+    conversas = montar_conversas(config, store, midia)
     ferramentas = Ferramentas(store, pesquisa=pesquisa,
                               acoes=montar_acoes(config, store),
                               mapa=montar_mapa(config, args.state_dir.expanduser()),
-                              conversas=montar_conversas(config, store, midia),
+                              conversas=conversas,
                               base=Base(config.base_conhecimento), midia=midia,
                               orcamentos=Orcamentos(config.orcamentos_pasta, os.path.join(
                                   os.path.expanduser(config.base_conhecimento), "precos.json")),
-                              tarefas=montar_tarefas(config))
+                              tarefas=montar_tarefas(config), documentos=Documentos(config.documentos_pasta),
+                              autonomia=montar_autonomia(config, args.state_dir.expanduser()))
+    if config.principal_envio_ativo and conversas is not None:
+        from .envios_whatsapp import EnviosWhatsApp
+        ferramentas.envios_whatsapp = EnviosWhatsApp(
+            config.principal_ponte_url, conversas, store, ferramentas.orcamentos,
+            documentos=ferramentas.documentos)
     canal = None
     if config.canal_configurado:
         from .canais import montar_canal
@@ -112,6 +124,16 @@ def montar(args):
         # Só o canal sabe mandar arquivo, e só para o grupo dele.
         ferramentas.enviar_arquivo = getattr(canal, "enviar_arquivo", None)
     return config, store, Zeus(store, None, persona, ferramentas, config, canal)
+
+
+def montar_autonomia(config, estado):
+    """Banco próprio da autonomia (#85); nada no banco do Zeus."""
+    if not config.autonomia_ativa:
+        return None
+    from .autonomia import Autonomia, segredo_do_arquivo
+    autonomia = Autonomia(Path(estado) / "autonomia.db", segredo=segredo_do_arquivo())
+    autonomia.objetivos.recuperar_passos_interrompidos()
+    return autonomia
 
 
 def montar_pesquisa(config, estado):
@@ -182,15 +204,162 @@ def montar_acoes(config, store=None):
                  registrar=registrar if store is not None else None)
 
 
-def montar_voz(config):
-    return Voz(config.voz_binario, config.voz_modelo)
+def _ao_trocar(qual):
+    def registrar(origem, motivo):
+        emit(f"{qual}_origem", origem=origem, motivo=str(motivo)[:200])
+    return registrar
+
+
+def montar_voz(config, estado=None):
+    """Piper sozinho, ou ElevenLabs com o Piper de reserva (#68)."""
+    local = Voz(config.voz_binario, config.voz_modelo)
+    if config.voz_provedor != "elevenlabs" or not config.openrouter_chave:
+        return local
+    from .gasto_voz import do_estado
+    from .voz import VozComReserva, VozElevenLabs
+    remota = VozElevenLabs(
+        config.openrouter_chave, config.openrouter_url, config.voz_eleven_modelo,
+        config.voz_eleven_modelo_caprichado, config.voz_eleven_voz,
+        config.voz_caprichada_acima, destino=local.destino,
+        gasto=do_estado(config, estado) if estado else None)
+    return VozComReserva(remota, local, ao_trocar=_ao_trocar("voz"))
 
 
 def montar_ouvidos(config, estado):
-    return Ouvidos(config.escuta_modelo, config.escuta_computo, config.escuta_idioma,
-                   threads=config.escuta_threads, destino=Path(estado) / "escuta",
-                   beam_size=config.escuta_beam, silencio_ms=config.escuta_silencio_ms,
-                   vocabulario=config.escuta_vocabulario)
+    local = Ouvidos(config.escuta_modelo, config.escuta_computo, config.escuta_idioma,
+                    threads=config.escuta_threads, destino=Path(estado) / "escuta",
+                    beam_size=config.escuta_beam, silencio_ms=config.escuta_silencio_ms,
+                    vocabulario=config.escuta_vocabulario)
+    return com_escuta_remota(config, estado, local, ao_trocar=_ao_trocar("escuta"))
+
+
+def responder_em_audio(canal, voz, pedido, resposta, destino):
+    """Áudio de Nicolas no grupo volta também como nota de voz (#68). O texto
+    já saiu pela fila durável; isto é um extra que pode falhar sem prejuízo."""
+    from .canais.whatsapp import MARCA_AUDIO_DE_NICOLAS
+    from .voz import nota_de_voz
+    if not str(pedido).startswith(MARCA_AUDIO_DE_NICOLAS):
+        return None
+    if not hasattr(canal, "enviar_arquivo") or not voz.disponivel():
+        return None
+    Path(destino).mkdir(parents=True, exist_ok=True, mode=0o700)
+    ogg = nota_de_voz(voz.falar(resposta), destino)
+    if ogg is None:
+        return None
+    canal.enviar_arquivo(str(ogg))
+    return ogg
+
+
+def montar_proatividade(zeus, store, config, controles, fila_de_saida, anunciar, voz, ambiente, hud,
+                        estado, modelo_ok):
+    """Motor dos objetivos (#85) e política de interrupção (#86). Sem autonomia,
+    nada disso existe e o Zeus segue como antes."""
+    autonomia = zeus.ferramentas.autonomia
+    if autonomia is None:
+        return None
+    from .motor import Motor
+    from .proatividade import Proatividade
+    publicar = hud.central.publicar if hud is not None and hud.central is not None else (lambda *a, **k: None)
+    falar, livre = falar_na_sala(voz, ambiente)
+    proatividade = Proatividade(autonomia, controles, fila_de_saida,
+                                zeus.canal.nome if zeus.canal is not None else None, anunciar=anunciar,
+                                falar_na_sala=falar, sala_livre=livre, emit=emit, estado_dir=estado,
+                                store=store, fechamento_hora=config.fechamento_hora)
+    proatividade.motor = Motor(autonomia, zeus.ferramentas,
+                               provedor=lambda: zeus.provedor if modelo_ok() else None,
+                               persona=zeus.persona, comunicar=proatividade.comunicar, store=store,
+                               autonomia_nivel=lambda: controles.ler().get("autonomia", "normal"),
+                               publicar=publicar)
+
+    def mudou(ap):
+        publicar("aprovacao", id=ap["id"], estado=ap["estado"], acao=ap["acao"])
+        if ap["estado"] != "pendente":
+            proatividade.nicolas_apareceu(f"aprovacao:{ap['id']}")
+    autonomia.aprovacoes.ao_mudar(mudou)
+    zeus.ao_decidir_aprovacao = lambda: publicar("atividade")
+    return proatividade
+
+
+def falar_na_sala(voz, ambiente):
+    """(falar, sala_livre). A escuta do ambiente, se existir, dona do alto-falante
+    e da guarda de eco; sem ela, um alto-falante próprio. Sem voz, nada."""
+    if voz is None or not voz.disponivel():
+        return None, (lambda: False)
+    if ambiente is not None:
+        return ambiente.anunciar, (lambda: ambiente.estado == ambiente.DORMINDO and ambiente.guarda.aberto())
+    from .escuta_continua import AltoFalante, GuardaDeEco, para_fala
+    alto = AltoFalante(GuardaDeEco())
+    if not alto.disponivel():
+        return None, (lambda: False)
+
+    def falar(texto):
+        Thread(target=lambda: alto.tocar(voz.falar(para_fala(texto))), daemon=True).start()
+    return falar, alto.guarda.aberto
+
+
+def tratar_pedido_de_autonomia(pedido, ferramentas, emit):
+    """Pausar, retomar, abandonar e desfazer pedidos pela Central (#84/#85)."""
+    a = ferramentas.autonomia
+    try:
+        if pedido["tipo"] == "objetivo_estado":
+            if pedido["estado"] == "ativo":
+                a.objetivos.mudar_estado(pedido["objetivo"], "ativo", "retomado pela Central")
+                a.objetivos.atualizar(pedido["objetivo"], acordar_em=time.time())
+            elif pedido["estado"] == "bloqueado":
+                a.objetivos.bloquear(pedido["objetivo"], pedido.get("motivo") or "pausado pela Central")
+            else:
+                a.objetivos.mudar_estado(pedido["objetivo"], "abandonado", "abandonado pela Central")
+        elif pedido["tipo"] == "desfazer":
+            registro = next((r for r in a.trilha.listar(limite=2000) if r["id"] == pedido["registro"]), None)
+            desfazer = (registro or {}).get("desfazer")
+            if not registro or not desfazer or registro.get("desfeito_em"):
+                emit("desfazer_recusado", registro=pedido["registro"])
+                return
+            for acao, args in (desfazer if isinstance(desfazer, dict) else {}).items():
+                if acao in ("lembrar_fato", "agendar_lembrete"):
+                    ferramentas.executar(acao, args)
+            a.trilha.marcar_desfeito(registro["id"])
+        emit("autonomia_pedido", tipo=pedido["tipo"])
+    except Exception as erro:
+        emit("autonomia_pedido_falhou", detalhe=str(erro)[:200])
+
+
+def briefing_do_dia(zeus, store, config, voz, fila_de_saida, anunciar, modelo_ok, estado):
+    """Uma vez por dia, dentro da janela: texto pela fila durável, áudio depois."""
+    from .briefing import chave_do_dia, coletar, escrever, ja_enviado, na_janela
+    agora = datetime.now().astimezone()
+    chave = chave_do_dia(agora)
+    if not na_janela(agora, config.briefing_hora, config.briefing_janela_horas):
+        return None
+    if ja_enviado(store, chave):
+        return None
+    dados = coletar(store, agora, zeus.ferramentas.tarefas, zeus.ferramentas.base,
+                    zeus.ferramentas.autonomia)
+    texto = escrever(zeus.provedor if modelo_ok else None, zeus.persona, dados,
+                     config.temperatura_conversa)
+    # Fora do histórico: o texto resume mensagens de terceiros (#9).
+    if not fila_de_saida.preparar(chave, zeus.canal.nome, texto, tipo="aviso_terceiro"):
+        return None
+    emit("briefing", canal=zeus.canal.nome, caracteres=len(texto))
+    anunciar("zeus", texto)
+    if config.briefing_audio and hasattr(zeus.canal, "enviar_arquivo") and voz.disponivel():
+        def em_audio():
+            from .voz import nota_de_voz
+            try:
+                try:
+                    wav = voz.falar(texto, caprichada=True)
+                except TypeError:  # Piper puro não tem voz caprichada
+                    wav = voz.falar(texto)
+                destino = Path(estado) / "voz-whatsapp"
+                destino.mkdir(parents=True, exist_ok=True, mode=0o700)
+                ogg = nota_de_voz(wav, destino)
+                if ogg is not None:
+                    zeus.canal.enviar_arquivo(str(ogg))
+                    emit("briefing_em_audio")
+            except Exception as erro:
+                emit("briefing_audio_falhou", detalhe=str(erro)[:200])
+        Thread(target=em_audio, daemon=True).start()
+    return texto
 
 
 def retrato(store, config, voz, modelo="", ouvidos=None):
@@ -207,13 +376,50 @@ def retrato(store, config, voz, modelo="", ouvidos=None):
         "voz": voz.disponivel() if voz else False,
         "ouvidos": ouvidos.disponivel() if ouvidos else False,
         "motivo_ouvidos": ouvidos.diagnostico() if ouvidos else "desligada",
+        # Para a tela Sistema da Central (#84): quem está respondendo e quanto custou.
+        "degrau": _degrau_atual(),
+        "voz_origem": getattr(voz, "ultima_origem", "") if voz else "",
+        "escuta_origem": getattr(ouvidos, "ultima_origem", "") if ouvidos else "",
+        "custo_hoje": custo_de_hoje(store),
     }
+
+
+_PROVEDOR_ATUAL = []
+
+
+def _degrau_atual():
+    """1 = principal; numa escada (#72), o degrau que respondeu por último."""
+    provedor = _PROVEDOR_ATUAL[0] if _PROVEDOR_ATUAL else None
+    if provedor is None or not hasattr(provedor, "ultimo_degrau"):
+        return None
+    return provedor.ultimo_degrau + 1
+
+
+def custo_de_hoje(store):
+    """Soma o custo real dos turnos de hoje (custos.py, evento custo_turno)."""
+    inicio = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        linhas = store.connection.execute(
+            "SELECT dados FROM eventos WHERE origem='llm' AND tipo='custo_turno' AND em >= ?",
+            (inicio.astimezone(timezone.utc).isoformat(),)).fetchall()
+    except Exception:
+        return None
+    total = 0.0
+    for linha in linhas:
+        try:
+            total += float(json.loads(linha[0]).get("custo_usd") or 0)
+        except (ValueError, TypeError):
+            continue
+    return round(total, 6)
 
 
 def ligar_modelo(zeus, config):
     """Verificação obrigatória antes de usar o modelo em qualquer conversa."""
-    provedor = criar_provedor(config)
+    zeus.ao_afirmacao_vazia = lambda: emit("afirmacao_vazia")
+    provedor = criar_provedor(config, ao_trocar=lambda degrau, modelo, motivo: emit(
+        "modelo_degrau", degrau=degrau, modelo=modelo, motivo=motivo[:300]))
     servido = provedor.verificar()
+    _PROVEDOR_ATUAL[:] = [provedor]
     # Cada chamada paga vai para o log: é assim que se mede um dia de uso.
     contabilizar(provedor, lambda uso: emit("uso_modelo", **uso))
     midia = getattr(zeus.ferramentas, "midia", None)
@@ -313,6 +519,9 @@ def main():
     conversa = commands.add_parser("conversar", help="Uma troca pelo terminal")
     conversa.add_argument("texto")
 
+    briefing = commands.add_parser("briefing", help="Mostra o briefing de hoje, sem enviar")
+    briefing.add_argument("--dados", action="store_true", help="Mostra também os dados coletados")
+
     evento = commands.add_parser("evento", help="Registrar um acontecimento observado")
     evento.add_argument("tipo")
     evento.add_argument("resumo")
@@ -340,7 +549,7 @@ def main():
                     canal = "ausente" if zeus.canal is None else zeus.canal.verificar()
                 except ErroDeCanal as erro:
                     canal = f"falhou: {erro}"
-            voz = montar_voz(config)
+            voz = montar_voz(config, args.state_dir.expanduser())
             ouvidos = montar_ouvidos(config, args.state_dir.expanduser())
             from .quentes import diagnostico as diagnostico_dos_quentes
             emit("storage_check", version=__version__, storage=integrity,
@@ -474,6 +683,14 @@ def main():
         elif args.command == "conversar":
             ligar_modelo(zeus, config)
             print(zeus.conversar(args.texto, canal="cli"))
+        elif args.command == "briefing":
+            from .briefing import coletar, escrever
+            ligar_modelo(zeus, config)
+            dados = coletar(store, datetime.now().astimezone(), zeus.ferramentas.tarefas,
+                            zeus.ferramentas.base)
+            if args.dados:
+                print(json.dumps(dados, ensure_ascii=False, indent=1))
+            print(escrever(zeus.provedor, zeus.persona, dados, config.temperatura_conversa))
         elif args.command == "run":
             return executar(zeus, store, config)
         return 0
@@ -654,11 +871,32 @@ def _executar(zeus, store, config):
         servido = f"indisponível: {erro}"
 
     operacao.atualizar('modelo', estado='pronta' if modelo_ok else 'indisponivel')
+    modelo_ok_atual = [modelo_ok]
     proxima_recuperacao = time.monotonic() + max(5, config.intervalo_recuperacao_modelo)
-    voz = montar_voz(config)
     estado_local = Path(store.path).parent
+    voz = montar_voz(config, estado_local)
+    # Aviso de 80% do teto de voz: nasce na thread da fala e vai para a fila
+    # durável aqui, no laço principal, que é dono da conexão com o banco.
+    avisos_de_gasto = queue.SimpleQueue()
+    proximo_briefing = 0.0
+    vigia_hardware, saude_local, proxima_leitura = None, None, 0.0
+    if config.hardware_vigia:
+        from .saude import Saude
+        from .vigia_hardware import VigiaDeHardware
+        saude_local = Saude(estado_local)
+        vigia_hardware = VigiaDeHardware({
+            "cpu_celsius": config.hardware_cpu_celsius,
+            "gpu_celsius": config.hardware_gpu_celsius,
+            "ram_pct": config.hardware_ram_pct,
+            "disco_livre_pct": config.hardware_disco_livre_pct})
+    if config.voz_provedor == "elevenlabs" or config.escuta_provedor == "scribe":
+        from .gasto_voz import do_estado
+        do_estado(config, estado_local, avisar=avisos_de_gasto.put)
     ouvidos = montar_ouvidos(config, estado_local)
     recebidas_da_hud = CaixaDeEntrada(maxsize=32)
+    from .hud.central import Controles, volume_pelo_pipewire
+    controles = Controles(estado_local / "controles.json", aplicar_volume=volume_pelo_pipewire)
+    memoria_hud = None
     hud, endereco = None, None
     chave = config.chave_hud or secrets.token_urlsafe(12)
     try:
@@ -677,6 +915,16 @@ def _executar(zeus, store, config):
             pasta_de_escuta=ouvidos.destino,
             mapa=montar_mapa(config, estado_local),
             certificado=certificado, chave_tls=chave_tls)
+        from .hud.central import Central
+        gasto = None
+        if config.voz_provedor == "elevenlabs" or config.escuta_provedor == "scribe":
+            from .gasto_voz import do_estado
+            gasto = do_estado(config, estado_local)
+        from .pareamento import Pareamento
+        pareamento = Pareamento(estado_local / "pareamento.json")
+        hud.central = Central(hud, autonomia=zeus.ferramentas.autonomia, pareamento=pareamento,
+                              controles=controles, gasto=gasto)
+        pareamento.ao_revogar = hud.central.revogar_aparelho
         porta = hud.iniciar()
         esquema = "https" if hud.seguro else "http"
         endereco = f"{esquema}://{endereco_local()}:{porta}/?chave={chave}"
@@ -707,7 +955,7 @@ def _executar(zeus, store, config):
 
     def responder(texto, canal, em_fluxo=False):
         """Uma pergunta, uma resposta, a mesma identidade em qualquer canal."""
-        if not modelo_ok:
+        if not modelo_ok and not zeus.pode_responder_localmente(texto):
             store.registrar_turno(canal, "nicolas", texto)
             return SEM_MODELO
         if not (em_fluxo and hud is not None):
@@ -728,6 +976,11 @@ def _executar(zeus, store, config):
             contar_lugares()
 
     fala = FalaEmSegundoPlano(voz, hud.publicar) if hud is not None else None
+    from .escuta_continua import montar_escuta_ambiente
+    ambiente, motivo_ambiente = montar_escuta_ambiente(
+        config, estado_local, ouvidos, voz, recebidas_da_hud.put_nowait,
+        publicar=hud.publicar if hud is not None else None, emitir=emit)
+    emit("escuta_ambiente", situacao=motivo_ambiente)
     supervisor = SupervisorPresenca(estado_local, config, stopped, hud, operacao)
     supervisor.iniciar()
     if not supervisor.pronto.wait(5) or operacao.retrato().get('agenda', {}).get('estado') == 'indisponivel':
@@ -738,6 +991,10 @@ def _executar(zeus, store, config):
         if hud:
             hud.parar()
         raise ValueError('Não foi possível iniciar a agenda persistente.')
+    if ambiente is not None:
+        ambiente.iniciar()
+    proatividade = montar_proatividade(zeus, store, config, controles, fila_de_saida, anunciar, voz,
+                                       ambiente, hud, estado_local, lambda: modelo_ok_atual[0])
     recepcao = None
     if zeus.canal is not None:
         def criar_receptor():
@@ -822,10 +1079,11 @@ def _executar(zeus, store, config):
                     emit("vigia_indisponivel", detalhe=str(erro)[:200])
                 if zeus.ferramentas.tarefas is not None:
                     try:
+                        zeus.ferramentas.tarefas.enviar_arquivo = zeus.ferramentas.enviar_arquivo
                         for tarefa, texto in zeus.ferramentas.tarefas.verificar():
                             # O resumo vem de um agente que leu o repositório:
                             # vai como aviso, fora do histórico da conversa.
-                            chave = f"tarefa:{tarefa['numero']}:{tarefa['situacao']}"
+                            chave = f"tarefa:{tarefa['numero']}:{tarefa['situacao']}:"+hashlib.sha256(texto.encode()).hexdigest()[:16]
                             if fila_de_saida.preparar(chave, zeus.canal.nome, texto,
                                                       tipo="aviso_terceiro"):
                                 avisos.append(texto)
@@ -847,6 +1105,11 @@ def _executar(zeus, store, config):
                 except queue.Empty:
                     break
                 geracao = fala.invalidar() if fala else 0
+                if proatividade is not None and pedido.get("tipo") in ("texto", "audio", "telegram", "ambiente"):
+                    proatividade.nicolas_apareceu()
+                if pedido.get("tipo") in ("objetivo_estado", "desfazer") and zeus.ferramentas.autonomia:
+                    tratar_pedido_de_autonomia(pedido, zeus.ferramentas, emit)
+                    continue
                 if hud is not None:
                     hud.publicar("situacao", estado="pensando", detalhe="recebido", geracao=geracao)
                 zeus.capacidades = {"voz": voz.disponivel(), "ouvidos": ouvidos.disponivel(),
@@ -877,12 +1140,46 @@ def _executar(zeus, store, config):
                         fila_de_saida.concluir_resposta(chave_resposta, resposta,
                                                         canal=nome_do_canal)
                         anunciar("zeus", resposta)
+                        if config.voz_resposta_em_audio:
+                            def em_audio(pedido_texto=texto, final=resposta):
+                                try:
+                                    if responder_em_audio(zeus.canal, voz, pedido_texto, final,
+                                                          estado_local / "voz-whatsapp"):
+                                        emit("resposta_em_audio", canal=nome_do_canal)
+                                except Exception as erro:
+                                    emit("resposta_em_audio_falhou", detalhe=str(erro)[:200])
+                            Thread(target=em_audio, daemon=True).start()
                     except Exception:
                         if chave_resposta:
                             fila_de_saida.resposta_incerta(chave_resposta)
                         raise
                     finally:
                         pedido["terminado"].set()
+                    continue
+                if pedido.get("tipo") == "ambiente":
+                    # Fala ouvida pelo microfone da casa: a resposta volta pela
+                    # escuta, que fala no alto-falante; a HUD só acompanha.
+                    final = None
+                    try:
+                        if hud is not None:
+                            hud.publicar("mensagem", de="nicolas", texto=pedido["texto"],
+                                         hora=datetime.now().strftime("%H:%M"))
+                        final = responder(pedido["texto"], "voz", em_fluxo=True)
+                        anunciar("zeus", final)
+                    finally:
+                        pedido["responder"](final)
+                    continue
+                if pedido.get("tipo") == "memoria":
+                    if memoria_hud is None:
+                        from .memoria_hud import MemoriaDaHUD
+                        memoria_hud = MemoriaDaHUD(store)
+                    resultado = memoria_hud.executar(pedido["acao"], pedido["fato"])
+                    emit("memoria_hud", acao=resultado["acao"], ok=resultado["ok"])
+                    if hud is not None:
+                        hud.publicar("memoria", **resultado)
+                        hud.atualizar(retrato(store, config, voz, servido if modelo_ok else "",
+                                              ouvidos))
+                        hud.publicar("situacao", estado="ocioso", detalhe="—")
                     continue
                 texto = pedido.get("texto", "")
                 if pedido.get("tipo") == "audio":
@@ -919,6 +1216,47 @@ def _executar(zeus, store, config):
                 hud.publicar("mensagem", de="sistema",
                              texto="Não consegui concluir esta resposta. Pode tentar novamente.")
             stopped.wait(0.5)
+        if vigia_hardware is not None and time.monotonic() >= proxima_leitura:
+            proxima_leitura = time.monotonic() + 30
+            try:
+                for aviso in vigia_hardware.avaliar(saude_local.medir()):
+                    emit("hardware_alerta", detalhe=aviso)
+                    if proatividade is not None:
+                        from .iniciativa import Aviso
+                        normalizou = aviso.startswith("Normalizou")
+                        proatividade.comunicar(Aviso(f"hardware:{time.time_ns()}", aviso,
+                                                     urgencia=0.3 if normalizou else 0.75,
+                                                     utilidade=0.5 if normalizou else 0.85))
+                        continue
+                    anunciar("zeus", aviso)
+                    if zeus.canal is not None:
+                        fila_de_saida.preparar(f"hardware:{time.time_ns()}", zeus.canal.nome,
+                                               aviso, tipo="aviso")
+                    if ambiente is not None:
+                        ambiente.anunciar(aviso)
+            except Exception as erro:
+                emit("hardware_falhou", detalhe=str(erro)[:200])
+        if config.briefing_hora and zeus.canal is not None and time.monotonic() >= proximo_briefing:
+            proximo_briefing = time.monotonic() + 60
+            try:
+                briefing_do_dia(zeus, store, config, voz, fila_de_saida, anunciar,
+                                modelo_ok, estado_local)
+            except Exception as erro:
+                emit("briefing_falhou", detalhe=str(erro)[:200])
+        modelo_ok_atual[0] = modelo_ok
+        if proatividade is not None:
+            try:
+                proatividade.tick(modelo_ok, config.motor_intervalo_s)
+            except Exception as erro:
+                emit("proatividade_falhou", detalhe=str(erro)[:200])
+        while not avisos_de_gasto.empty():
+            aviso = avisos_de_gasto.get()
+            emit("voz_teto_80", detalhe=aviso)
+            anunciar("zeus", aviso)
+            if zeus.canal is not None:
+                medida = "fala" if "fala" in aviso else "escuta"
+                fila_de_saida.preparar(f"voz-teto:{datetime.now().date()}:{medida}",
+                                       zeus.canal.nome, aviso, tipo="aviso")
         recebidas_da_hud.aguardar(min(max(config.intervalo_agenda, 0.1), 1))
         agora = datetime.now(timezone.utc).timestamp()
         if agora - ultimo_batimento >= 30:
@@ -926,6 +1264,8 @@ def _executar(zeus, store, config):
             emit("heartbeat", storage="ok")
             ultimo_batimento = agora
 
+    if ambiente is not None:
+        ambiente.parar()
     supervisor.parar()
     if fala is not None:
         fala.parar()
