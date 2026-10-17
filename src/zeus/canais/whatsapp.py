@@ -36,6 +36,10 @@ MIDIAS = {"image": "imagem", "audio": "áudio", "video": "vídeo",
           "document": "documento", "sticker": "figurinha"}
 
 
+# Prefixo do pedido que veio por áudio: a resposta volta também em áudio (#68).
+MARCA_AUDIO_DE_NICOLAS = "[áudio de Nicolas, transcrito]"
+
+
 def lista(valor) -> tuple:
     """Aceita lista do JSON ou texto separado por vírgula vindo do ambiente."""
     if not valor:
@@ -346,7 +350,7 @@ class CanalWhatsApp:
         if m.get("tipo_midia") != "audio":
             return marcador(m, "grupo")
         try:
-            return "[áudio de Nicolas, transcrito] " + self.midia.ler("grupo", m["id"], m["chat"])["texto"]
+            return MARCA_AUDIO_DE_NICOLAS + " " + self.midia.ler("grupo", m["id"], m["chat"])["texto"]
         except MidiaIndisponivel as erro:
             return f"[Nicolas mandou um áudio que não consegui transcrever: {erro}]"
 

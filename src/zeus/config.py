@@ -69,6 +69,24 @@ class Config:
     chave_hud: str = ""
     voz_binario: str = "piper"
     voz_modelo: str = ""
+    # Voz e escuta remotas pela ElevenLabs no OpenRouter (#68), com a mesma
+    # `openrouter_chave`. "piper"/"local" mantêm tudo em casa. A voz é um nome
+    # da lista do OpenRouter (brian, george...) ou um voice_id da Voice Library.
+    voz_provedor: str = "piper"
+    voz_eleven_modelo: str = "elevenlabs/eleven-v4-turbo"
+    voz_eleven_modelo_caprichado: str = "elevenlabs/eleven-v4"
+    voz_eleven_voz: str = "brian"
+    voz_caprichada_acima: int = 400
+    # Teto diário; passou, cai para o local até a meia-noite. Aviso aos 80%.
+    voz_teto_caracteres_dia: int = 60000
+    escuta_teto_segundos_dia: int = 3600
+    # Áudio de Nicolas no WhatsApp volta também como nota de voz.
+    voz_resposta_em_audio: bool = True
+    escuta_provedor: str = "local"
+    escuta_scribe_modelo: str = "elevenlabs/scribe-v2"
+    # Mídia do WhatsApp inclui áudio de terceiros (clientes, Henrique). Ligar
+    # manda essas vozes ao Scribe; o texto delas já vai ao modelo remoto.
+    escuta_scribe_midia: bool = False
     hud_tls: bool = True
     escuta_modelo: str = "small"
     escuta_computo: str = "int8"
