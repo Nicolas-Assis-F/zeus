@@ -239,6 +239,43 @@ def responder_em_audio(canal, voz, pedido, resposta, destino):
     return ogg
 
 
+def briefing_do_dia(zeus, store, config, voz, fila_de_saida, anunciar, modelo_ok, estado):
+    """Uma vez por dia, dentro da janela: texto pela fila durável, áudio depois."""
+    from .briefing import chave_do_dia, coletar, escrever, ja_enviado, na_janela
+    agora = datetime.now().astimezone()
+    chave = chave_do_dia(agora)
+    if not na_janela(agora, config.briefing_hora, config.briefing_janela_horas):
+        return None
+    if ja_enviado(store, chave):
+        return None
+    dados = coletar(store, agora, zeus.ferramentas.tarefas, zeus.ferramentas.base)
+    texto = escrever(zeus.provedor if modelo_ok else None, zeus.persona, dados,
+                     config.temperatura_conversa)
+    # Fora do histórico: o texto resume mensagens de terceiros (#9).
+    if not fila_de_saida.preparar(chave, zeus.canal.nome, texto, tipo="aviso_terceiro"):
+        return None
+    emit("briefing", canal=zeus.canal.nome, caracteres=len(texto))
+    anunciar("zeus", texto)
+    if config.briefing_audio and hasattr(zeus.canal, "enviar_arquivo") and voz.disponivel():
+        def em_audio():
+            from .voz import nota_de_voz
+            try:
+                try:
+                    wav = voz.falar(texto, caprichada=True)
+                except TypeError:  # Piper puro não tem voz caprichada
+                    wav = voz.falar(texto)
+                destino = Path(estado) / "voz-whatsapp"
+                destino.mkdir(parents=True, exist_ok=True, mode=0o700)
+                ogg = nota_de_voz(wav, destino)
+                if ogg is not None:
+                    zeus.canal.enviar_arquivo(str(ogg))
+                    emit("briefing_em_audio")
+            except Exception as erro:
+                emit("briefing_audio_falhou", detalhe=str(erro)[:200])
+        Thread(target=em_audio, daemon=True).start()
+    return texto
+
+
 def retrato(store, config, voz, modelo="", ouvidos=None):
     """O que a HUD mostra: memória confirmada, pendências e conversa recente."""
     return {
@@ -358,6 +395,9 @@ def main():
 
     conversa = commands.add_parser("conversar", help="Uma troca pelo terminal")
     conversa.add_argument("texto")
+
+    briefing = commands.add_parser("briefing", help="Mostra o briefing de hoje, sem enviar")
+    briefing.add_argument("--dados", action="store_true", help="Mostra também os dados coletados")
 
     evento = commands.add_parser("evento", help="Registrar um acontecimento observado")
     evento.add_argument("tipo")
@@ -520,6 +560,14 @@ def main():
         elif args.command == "conversar":
             ligar_modelo(zeus, config)
             print(zeus.conversar(args.texto, canal="cli"))
+        elif args.command == "briefing":
+            from .briefing import coletar, escrever
+            ligar_modelo(zeus, config)
+            dados = coletar(store, datetime.now().astimezone(), zeus.ferramentas.tarefas,
+                            zeus.ferramentas.base)
+            if args.dados:
+                print(json.dumps(dados, ensure_ascii=False, indent=1))
+            print(escrever(zeus.provedor, zeus.persona, dados, config.temperatura_conversa))
         elif args.command == "run":
             return executar(zeus, store, config)
         return 0
@@ -706,6 +754,7 @@ def _executar(zeus, store, config):
     # Aviso de 80% do teto de voz: nasce na thread da fala e vai para a fila
     # durável aqui, no laço principal, que é dono da conexão com o banco.
     avisos_de_gasto = queue.SimpleQueue()
+    proximo_briefing = 0.0
     if config.voz_provedor == "elevenlabs" or config.escuta_provedor == "scribe":
         from .gasto_voz import do_estado
         do_estado(config, estado_local, avisar=avisos_de_gasto.put)
@@ -1001,6 +1050,13 @@ def _executar(zeus, store, config):
                 hud.publicar("mensagem", de="sistema",
                              texto="Não consegui concluir esta resposta. Pode tentar novamente.")
             stopped.wait(0.5)
+        if config.briefing_hora and zeus.canal is not None and time.monotonic() >= proximo_briefing:
+            proximo_briefing = time.monotonic() + 60
+            try:
+                briefing_do_dia(zeus, store, config, voz, fila_de_saida, anunciar,
+                                modelo_ok, estado_local)
+            except Exception as erro:
+                emit("briefing_falhou", detalhe=str(erro)[:200])
         while not avisos_de_gasto.empty():
             aviso = avisos_de_gasto.get()
             emit("voz_teto_80", detalhe=aviso)

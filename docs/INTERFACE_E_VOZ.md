@@ -342,3 +342,33 @@ As pendências (perguntas, agenda, entregas, memória, operação) ficam em abas
 com contador, em vez de empilhadas numa lista só.
 
 Abaixo de 980 px a página vira três vistas — Conversa, Saúde e Mapa — no celular.
+
+## Briefing da manhã (#74)
+
+```json
+"briefing_hora": "07:30",
+"briefing_janela_horas": 3,
+"briefing_audio": true
+```
+
+Uma vez por dia, entre `briefing_hora` e o fim da janela, o Zeus manda no
+grupo um bom-dia com:
+
+- a agenda de hoje e o que está atrasado;
+- as perguntas em aberto;
+- os avisos do vigia nas últimas 24 horas;
+- as tarefas de código vivas;
+- as pendências da base.
+
+O texto vai pela fila durável (chave `briefing:AAAA-MM-DD`, então reiniciar
+não duplica). A nota de voz sai logo depois, na voz caprichada (Eleven v4).
+Se a máquina estava desligada na janela, o briefing do dia não sai.
+
+É escrito **sem ferramentas** e fica fora do histórico da conversa, porque os
+avisos trazem texto de terceiro (#9). Sem modelo, sai uma versão seca, só com
+os fatos. Para conferir sem enviar nada:
+
+```bash
+./zeus briefing          # o texto de hoje
+./zeus briefing --dados  # e o que foi coletado
+```

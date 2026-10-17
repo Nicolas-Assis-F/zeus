@@ -87,6 +87,11 @@ class Config:
     # Mídia do WhatsApp inclui áudio de terceiros (clientes, Henrique). Ligar
     # manda essas vozes ao Scribe; o texto delas já vai ao modelo remoto.
     escuta_scribe_midia: bool = False
+    # Briefing da manhã (#74): "07:30" liga; vazio desliga. Só sai dentro da
+    # janela depois da hora, uma vez por dia, em texto e (se houver voz) áudio.
+    briefing_hora: str = ""
+    briefing_janela_horas: int = 3
+    briefing_audio: bool = True
     # Escuta no ambiente, pelo microfone da própria máquina (#68). Desligada
     # por padrão: microfone ouvindo a casa é decisão de Nicolas. Fonte e saída
     # são nomes de nó do PipeWire (`wpctl status`); vazio é o padrão do sistema.
