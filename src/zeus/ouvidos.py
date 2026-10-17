@@ -33,6 +33,11 @@ class Ouvidos:
         self._erro = ""
         self.ultima_medicao = {}
 
+    def assinatura(self):
+        """Identidade do reconhecimento para não reutilizar transcrição antiga."""
+        return (self.modelo, self.computo, self.idioma, self.beam_size,
+                self.silencio_ms, self.vocabulario, self.limite_segundos)
+
     def instalado(self):
         try:
             import faster_whisper  # noqa: F401

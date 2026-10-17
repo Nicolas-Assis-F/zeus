@@ -140,7 +140,7 @@ class LeituraDaPonte:
                                   "antiga": False})
         return mensagens
 
-    def conversa(self, chats, limite: int = 10):
+    def conversa(self, chats, limite: int = 10, antes_de: str = ""):
         """As últimas mensagens de uma conversa nos dois sentidos, da mais velha à
         mais nova. `meu` diz se saiu deste número."""
         chats = tuple(chats)
@@ -148,22 +148,31 @@ class LeituraDaPonte:
             return []
         conexao = self._abrir()
         try:
+            filtro, parametros = "", chats
+            if antes_de:
+                ancora = conexao.execute(
+                    "SELECT timestamp, rowid FROM messages WHERE rowid=? AND chat_jid IN (%s)"
+                    % ",".join("?" for _ in chats), (str(antes_de),) + chats).fetchone()
+                if ancora is None:
+                    raise ValueError("Cursor inválido para esta conversa.")
+                filtro = " AND (timestamp < ? OR (timestamp = ? AND rowid < ?))"
+                parametros += (ancora["timestamp"], ancora["timestamp"], ancora["rowid"])
             linhas = conexao.execute(
                 "SELECT rowid AS linha, id, chat_jid, sender, content, timestamp, media_type, filename, "
-                "is_from_me FROM messages WHERE chat_jid IN (%s) "
-                "ORDER BY timestamp DESC, rowid DESC LIMIT ?" % ",".join("?" for _ in chats),
-                chats + (int(limite),)).fetchall()
+                "is_from_me FROM messages WHERE chat_jid IN (%s) " % ",".join("?" for _ in chats)
+                + filtro + " ORDER BY timestamp DESC, rowid DESC LIMIT ?",
+                parametros + (int(limite),)).fetchall()
         except sqlite3.Error as erro:
             raise ErroDeCanal(f"O banco da ponte não respondeu: {erro}") from None
         finally:
             conexao.close()
-        return [{"id": l["id"], "chat": l["chat_jid"], "texto": texto_da_mensagem(l) or "(vazia)",
+        return [{"linha": l["linha"], "id": l["id"], "chat": l["chat_jid"], "texto": texto_da_mensagem(l) or "(vazia)",
                  "midia": bool(l["media_type"]), **extras_da_midia(l), "em": instante(l["timestamp"]),
                  "meu": bool(l["is_from_me"])} for l in reversed(linhas)]
 
     def midia(self, mensagem: str, chat: str = ""):
         """Os dados de uma mensagem com mídia, para baixar e ler. None se não há."""
-        sql = ("SELECT id, chat_jid, content, media_type, filename, file_length FROM messages "
+        sql = ("SELECT id, chat_jid, content, media_type, filename, file_length, file_sha256 FROM messages "
                "WHERE id=? AND media_type != ''")
         parametros = [mensagem]
         if chat:
@@ -180,7 +189,8 @@ class LeituraDaPonte:
             return None
         return {"id": linha["id"], "chat": linha["chat_jid"], "tipo": linha["media_type"],
                 "arquivo": linha["filename"] or "", "legenda": (linha["content"] or "").strip(),
-                "tamanho": int(linha["file_length"] or 0)}
+                "tamanho": int(linha["file_length"] or 0),
+                "sha256": bytes(linha["file_sha256"] or b"").hex()}
 
     def ultima_linha(self) -> int:
         conexao = self._abrir()

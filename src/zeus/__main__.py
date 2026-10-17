@@ -7,6 +7,7 @@ disso: sem visão, sem telefonia, sem dispositivo doméstico.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import queue
@@ -22,7 +23,9 @@ from . import __version__
 from .acoes import Acoes
 from .base import Base
 from .orcamento import Orcamentos
-from .tarefas import Tarefas, projetos
+from .tarefas import projetos
+from .tarefas_orca import TarefasOrca
+from .documentos import Documentos
 from .mapa import Mapa
 from .saudacao import compor as compor_saudacao
 from .saudacao import identificador_de_boot
@@ -77,7 +80,9 @@ def montar_tarefas(config):
     repositorios = projetos(config.tarefas_projetos)
     if not repositorios:
         return None
-    return Tarefas(config.tarefas_pasta, repositorios, limite_minutos=config.tarefas_minutos,
+    return TarefasOrca(config.tarefas_pasta, repositorios, limite_minutos=config.tarefas_minutos,
+                   orca=config.tarefas_orca_bin, agentes=config.tarefas_agentes,
+                   coordenador=config.tarefas_coordenador,
                    orcamento_usd=config.tarefas_usd, base=config.base_conhecimento)
 
 
@@ -97,14 +102,20 @@ def montar(args):
     pesquisa = montar_pesquisa(config, args.state_dir.expanduser())
     from .midia import montar_midia
     midia = montar_midia(config, args.state_dir.expanduser())
+    conversas = montar_conversas(config, store, midia)
     ferramentas = Ferramentas(store, pesquisa=pesquisa,
                               acoes=montar_acoes(config, store),
                               mapa=montar_mapa(config, args.state_dir.expanduser()),
-                              conversas=montar_conversas(config, store, midia),
+                              conversas=conversas,
                               base=Base(config.base_conhecimento), midia=midia,
                               orcamentos=Orcamentos(config.orcamentos_pasta, os.path.join(
                                   os.path.expanduser(config.base_conhecimento), "precos.json")),
-                              tarefas=montar_tarefas(config))
+                              tarefas=montar_tarefas(config), documentos=Documentos(config.documentos_pasta))
+    if config.principal_envio_ativo and conversas is not None:
+        from .envios_whatsapp import EnviosWhatsApp
+        ferramentas.envios_whatsapp = EnviosWhatsApp(
+            config.principal_ponte_url, conversas, store, ferramentas.orcamentos,
+            documentos=ferramentas.documentos)
     canal = None
     if config.canal_configurado:
         from .canais import montar_canal
@@ -707,7 +718,7 @@ def _executar(zeus, store, config):
 
     def responder(texto, canal, em_fluxo=False):
         """Uma pergunta, uma resposta, a mesma identidade em qualquer canal."""
-        if not modelo_ok:
+        if not modelo_ok and not zeus.pode_responder_localmente(texto):
             store.registrar_turno(canal, "nicolas", texto)
             return SEM_MODELO
         if not (em_fluxo and hud is not None):
@@ -822,10 +833,11 @@ def _executar(zeus, store, config):
                     emit("vigia_indisponivel", detalhe=str(erro)[:200])
                 if zeus.ferramentas.tarefas is not None:
                     try:
+                        zeus.ferramentas.tarefas.enviar_arquivo = zeus.ferramentas.enviar_arquivo
                         for tarefa, texto in zeus.ferramentas.tarefas.verificar():
                             # O resumo vem de um agente que leu o repositório:
                             # vai como aviso, fora do histórico da conversa.
-                            chave = f"tarefa:{tarefa['numero']}:{tarefa['situacao']}"
+                            chave = f"tarefa:{tarefa['numero']}:{tarefa['situacao']}:"+hashlib.sha256(texto.encode()).hexdigest()[:16]
                             if fila_de_saida.preparar(chave, zeus.canal.nome, texto,
                                                       tipo="aviso_terceiro"):
                                 avisos.append(texto)

@@ -276,14 +276,35 @@ class ProvedorOpenRouter:
     def _cabecalhos(self):
         return {"Authorization": f"Bearer {self.chave}"}
 
+    def _mensagens_com_cache(self, mensagens):
+        if not self.modelo.startswith("anthropic/"):
+            return mensagens
+        # O prefixo fixo (ferramentas + persona) permanece reutilizável mesmo
+        # quando a janela do histórico avança. Não altera a lista do chamador.
+        copia = [dict(m) for m in mensagens]
+        for mensagem in copia:
+            if mensagem.get("role") == "system" and isinstance(mensagem.get("content"), str):
+                mensagem["content"] = [{"type": "text", "text": mensagem["content"],
+                                          "cache_control": {"type": "ephemeral"}}]
+                break
+        return copia
+
     def _registrar_uso(self, uso, servido):
-        if not self.ao_usar or not isinstance(uso, dict):
-            return
+        if not isinstance(uso, dict):
+            uso = {}
         try:
-            self.ao_usar({"modelo": servido or self.modelo,
+            from .custos import registrar
+            detalhes = uso.get("prompt_tokens_details") or {}
+            registrado = registrar({"modelo": servido or self.modelo,
                           "entrada": uso.get("prompt_tokens"),
                           "saida": uso.get("completion_tokens"),
+                          **({"cache_lidos": detalhes["cached_tokens"]}
+                             if "cached_tokens" in detalhes else {}),
+                          **({"cache_escritos": detalhes["cache_write_tokens"]}
+                             if "cache_write_tokens" in detalhes else {}),
                           "custo": uso.get("cost")})
+            if self.ao_usar:
+                self.ao_usar(registrado)
         except Exception:
             # Contabilidade não derruba a conversa.
             pass
@@ -296,8 +317,10 @@ class ProvedorOpenRouter:
         return self.modelo
 
     def conversar(self, mensagens, ferramentas=None, temperatura=0.0) -> Resposta:
-        corpo = {"model": self.modelo, "messages": mensagens, "temperature": temperatura,
+        corpo = {"model": self.modelo, "messages": self._mensagens_com_cache(mensagens), "temperature": temperatura,
                  "usage": {"include": True}}
+        if self.modelo.startswith("anthropic/"):
+            corpo["cache_control"] = {"type": "ephemeral"}
         if ferramentas:
             corpo["tools"] = ferramentas
         dados = self.transporte("POST", f"{self.url}/chat/completions", corpo,
@@ -326,8 +349,10 @@ class ProvedorOpenRouter:
 
     def conversar_em_fluxo(self, mensagens, ferramentas=None, temperatura=0.0,
                            ao_receber=None) -> Resposta:
-        corpo = {"model": self.modelo, "messages": mensagens,
+        corpo = {"model": self.modelo, "messages": self._mensagens_com_cache(mensagens),
                  "temperature": temperatura, "stream": True, "usage": {"include": True}}
+        if self.modelo.startswith("anthropic/"):
+            corpo["cache_control"] = {"type": "ephemeral"}
         if ferramentas:
             corpo["tools"] = ferramentas
         partes, servido, chamadas, uso = [], "", {}, None
