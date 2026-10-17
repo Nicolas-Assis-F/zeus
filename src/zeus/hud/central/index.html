@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#060a10">
+<title>Zeus — Central</title>
+<link rel="manifest" href="/central/manifest.webmanifest">
+<link rel="icon" href="/central/icone.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/central/central.css">
+</head>
+<body data-orbe="dormindo">
+
+<div class="porta" id="porta" hidden>
+  <form id="formPorta" autocomplete="off">
+    <canvas id="orbePorta" width="320" height="320" aria-hidden="true"></canvas>
+    <h1 style="margin:0;font-size:20px;letter-spacing:.34em">ZEUS</h1>
+    <p style="color:var(--suave);margin:0">Digite a chave da HUD (<code>chave_hud</code>). Ela vira uma sessão neste aparelho;
+      a chave não fica no navegador.</p>
+    <label class="oculto" for="campoChave">Chave</label>
+    <input id="campoChave" type="password" placeholder="chave" required autocomplete="current-password">
+    <button class="bt pri" type="submit">Entrar</button>
+    <p class="erro-txt" id="erroPorta" role="alert"></p>
+    <p class="nota" id="notaPorta"></p>
+  </form>
+</div>
+
+<header class="topo">
+  <button class="marca" type="button" id="marca" title="Ir para Hoje"><canvas id="orbeTopo" width="76" height="76" aria-hidden="true"></canvas><b>ZEUS</b></button>
+  <div class="estado-txt" id="estadoTopo" role="status" aria-live="polite">Carregando…</div>
+  <span class="conexao" id="conexao" data-c="conectando"><i></i><span>conectando</span></span>
+  <button class="bt leve p" type="button" id="abrirPaleta" title="Paleta de comandos (Ctrl+K)">⌘ <span class="tecla">Ctrl K</span></button>
+  <button class="bt leve sino" type="button" id="sino" aria-haspopup="true" aria-expanded="false" title="Aprovações">
+    🔔<span class="oculto">Aprovações pendentes</span><span class="conta" id="contaSino" hidden aria-live="polite"></span></button>
+</header>
+<div class="pulso" aria-hidden="true"></div>
+
+<div class="corpo">
+  <nav class="lateral" aria-label="Telas">
+    <a href="#hoje"><span class="ic">☀</span><span>Hoje</span></a>
+    <a href="#conversa"><span class="ic">💬</span><span>Conversa</span></a>
+    <a href="#aprovacoes"><span class="ic">✔</span><span><span class="rot-longo">Aprovações</span><span aria-hidden="true" class="rot-curto"></span></span><span class="n" id="navAprov"></span></a>
+    <a href="#objetivos"><span class="ic">◎</span><span>Objetivos</span><span class="n" id="navObj"></span></a>
+    <a href="#atividade" data-menos><span class="ic">≡</span><span>Atividade</span></a>
+    <a href="#memoria" data-menos><span class="ic">🧠</span><span>Memória</span></a>
+    <a href="#sistema"><span class="ic">◈</span><span>Sistema</span><span class="n" id="navSis"></span></a>
+    <a href="#controles"><span class="ic">⚙</span><span>Controles</span></a>
+    <p class="dica">Ctrl+K: qualquer comando.<br>Ctrl+Espaço: falar.</p>
+  </nav>
+  <main id="principal" tabindex="-1"></main>
+</div>
+
+<div class="painel-sino" id="painelSino" hidden role="dialog" aria-label="Aprovações pendentes"></div>
+
+<dialog class="paleta" id="paleta" aria-label="Paleta de comandos">
+  <input id="buscaPaleta" type="text" placeholder="Comando ou pedido ao Zeus…" role="combobox" aria-expanded="true"
+         aria-controls="listaPaleta" aria-autocomplete="list" autocomplete="off">
+  <ul id="listaPaleta" role="listbox"></ul>
+  <div class="rodape">↑↓ escolher · Enter executar · Esc fechar · texto livre vira pedido ao Zeus</div>
+</dialog>
+
+<div class="oculto" id="anunciador" aria-live="assertive"></div>
+<script type="module" src="/central/js/app.js"></script>
+</body>
+</html>

@@ -290,7 +290,41 @@ def retrato(store, config, voz, modelo="", ouvidos=None):
         "voz": voz.disponivel() if voz else False,
         "ouvidos": ouvidos.disponivel() if ouvidos else False,
         "motivo_ouvidos": ouvidos.diagnostico() if ouvidos else "desligada",
+        # Para a tela Sistema da Central (#84): quem está respondendo e quanto custou.
+        "degrau": _degrau_atual(),
+        "voz_origem": getattr(voz, "ultima_origem", "") if voz else "",
+        "escuta_origem": getattr(ouvidos, "ultima_origem", "") if ouvidos else "",
+        "custo_hoje": custo_de_hoje(store),
     }
+
+
+_PROVEDOR_ATUAL = []
+
+
+def _degrau_atual():
+    """1 = principal; numa escada (#72), o degrau que respondeu por último."""
+    provedor = _PROVEDOR_ATUAL[0] if _PROVEDOR_ATUAL else None
+    if provedor is None or not hasattr(provedor, "ultimo_degrau"):
+        return None
+    return provedor.ultimo_degrau + 1
+
+
+def custo_de_hoje(store):
+    """Soma o custo real dos turnos de hoje (custos.py, evento custo_turno)."""
+    inicio = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        linhas = store.connection.execute(
+            "SELECT dados FROM eventos WHERE origem='llm' AND tipo='custo_turno' AND em >= ?",
+            (inicio.astimezone(timezone.utc).isoformat(),)).fetchall()
+    except Exception:
+        return None
+    total = 0.0
+    for linha in linhas:
+        try:
+            total += float(json.loads(linha[0]).get("custo_usd") or 0)
+        except (ValueError, TypeError):
+            continue
+    return round(total, 6)
 
 
 def ligar_modelo(zeus, config):
@@ -299,6 +333,7 @@ def ligar_modelo(zeus, config):
     provedor = criar_provedor(config, ao_trocar=lambda degrau, modelo, motivo: emit(
         "modelo_degrau", degrau=degrau, modelo=modelo, motivo=motivo[:300]))
     servido = provedor.verificar()
+    _PROVEDOR_ATUAL[:] = [provedor]
     # Cada chamada paga vai para o log: é assim que se mede um dia de uso.
     contabilizar(provedor, lambda uso: emit("uso_modelo", **uso))
     midia = getattr(zeus.ferramentas, "midia", None)
@@ -791,6 +826,14 @@ def _executar(zeus, store, config):
             pasta_de_escuta=ouvidos.destino,
             mapa=montar_mapa(config, estado_local),
             certificado=certificado, chave_tls=chave_tls)
+        from .hud.central import Central, Controles, volume_pelo_pipewire
+        gasto = None
+        if config.voz_provedor == "elevenlabs" or config.escuta_provedor == "scribe":
+            from .gasto_voz import do_estado
+            gasto = do_estado(config, estado_local)
+        hud.central = Central(hud, controles=Controles(estado_local / "controles.json",
+                                                       aplicar_volume=volume_pelo_pipewire),
+                              gasto=gasto)
         porta = hud.iniciar()
         esquema = "https" if hud.seguro else "http"
         endereco = f"{esquema}://{endereco_local()}:{porta}/?chave={chave}"
