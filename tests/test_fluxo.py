@@ -92,9 +92,11 @@ class FluxoNoNucleo(unittest.TestCase):
 
     def test_sem_ferramenta_o_texto_sai_inteiro_em_pedacos(self):
         with tempfile.TemporaryDirectory() as temp:
-            store, zeus = self.montar(temp, [Resposta("Marquei para as 19:30.", [], "m")])
+            # Frase neutra: "Marquei" sem ferramenta agora ganha correção (#78),
+            # coberta em test_recibo.
+            store, zeus = self.montar(temp, [Resposta("O treino é às 19:30.", [], "m")])
             pedacos = []
-            final = zeus.conversar("me lembra do treino", ao_receber=pedacos.append)
+            final = zeus.conversar("que horas é o treino?", ao_receber=pedacos.append)
             self.assertEqual("".join(p for p in pedacos if p).strip(), final)
             store.close()
 

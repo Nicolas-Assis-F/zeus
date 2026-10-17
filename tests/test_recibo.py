@@ -58,6 +58,20 @@ class TestNoNucleo(unittest.TestCase):
         self.assertIn(CORRECAO, final)
         self.assertEqual(self.vazias, [1])
 
+    def test_em_fluxo_descarta_o_rascunho_e_entrega_o_final(self):
+        class EmFluxo(ProvedorFalso):
+            def conversar_em_fluxo(self, mensagens, ferramentas=None, temperatura=0.0,
+                                   ao_receber=None):
+                resposta = self.conversar(mensagens, ferramentas, temperatura)
+                ao_receber(resposta.texto)
+                return resposta
+        zeus = self.zeus([])
+        zeus.provedor = EmFluxo([Resposta("Marquei para as 19:30.")])
+        pedacos = []
+        final = zeus.conversar("me lembra do treino", ao_receber=pedacos.append)
+        self.assertIn(None, pedacos)  # a tela troca o rascunho pelo final corrigido
+        self.assertTrue(final.endswith(CORRECAO))
+
     def test_anotei_com_ferramenta_fica_como_esta(self):
         chamada = {"id": "1", "nome": "lembrar_fato",
                    "argumentos": {"chave": "academia", "valor": "18h", "estado": "confirmado"}}
