@@ -247,3 +247,14 @@ As pendências (perguntas, agenda, entregas, memória, operação) ficam em abas
 com contador, em vez de empilhadas numa lista só.
 
 Abaixo de 980 px a página vira três vistas — Conversa, Saúde e Mapa — no celular.
+
+## Esquecer pela HUD (#79)
+
+Na aba Memória, cada fato tem um botão **esquecer**. O fato sai na hora, e a
+conversa mostra "Esqueci «chave»" com um botão **desfazer**, que vale por 5
+minutos. O desfazer restaura exatamente o que foi apagado (valor, origem e
+estado). A HUD nunca escreve um fato novo. Cada esquecimento e cada
+restauração viram episódio (`memoria_esquecida` e `memoria_restaurada`).
+
+Como o `forget` do terminal, isto tira o fato da memória ativa. Não apaga
+cópias de segurança anteriores.

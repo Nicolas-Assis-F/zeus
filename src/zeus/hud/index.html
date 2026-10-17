@@ -146,6 +146,9 @@
   ul.lista li{font-size:12.5px; padding:7px 9px; background:var(--painel2);
               border:1px solid var(--linha); border-radius:9px}
   ul.lista li span{display:block; color:var(--apagado); font-size:10.5px; margin-top:2px}
+  .acaoItem{margin-top:4px; margin-left:6px; font-size:10.5px; padding:2px 8px; cursor:pointer;
+    background:none; color:var(--apagado); border:1px solid var(--apagado); border-radius:6px}
+  .acaoItem:hover{color:inherit; border-color:currentColor}
   .vazio{color:var(--apagado); font-size:11.5px}
 
   /* -------------------------------------------------------------- gestos */
@@ -1117,6 +1120,23 @@ function fecharFluxo(texto, hora){
   return true;
 }
 
+/* Esquecer pela HUD (#79): o Zeus responde pelo fluxo, com "desfazer". */
+async function pedirMemoria(acao, fato){
+  try{
+    await fetch("/memoria?chave=" + encodeURIComponent(CHAVE), {method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify({acao, fato})});
+  }catch(e){ escrever("sistema", "Não consegui falar com o Zeus para mexer na memória."); }
+}
+function avisoDeMemoria(pacote){
+  escrever("sistema", pacote.texto);
+  if (pacote.acao !== "esquecida") return;
+  const b = document.createElement("button");
+  b.className = "acaoItem"; b.textContent = "desfazer";
+  b.onclick = () => { b.disabled = true; pedirMemoria("desfazer", pacote.fato); };
+  $("conversa").lastElementChild.appendChild(b);
+  setTimeout(() => b.remove(), (pacote.desfazer_s || 300) * 1000);
+}
+
 async function enviar(){
   const campo = $("texto");
   const texto = campo.value.trim();
@@ -1245,7 +1265,7 @@ function ajustarMicrofone(estado){
 }
 
 /* ---------------------------------------------------------------- estado */
-function listar(alvo, itens, vazio, formatar, conta){
+function listar(alvo, itens, vazio, formatar, conta, acao){
   const lista = $(alvo);
   lista.innerHTML = "";
   if (conta) $(conta).textContent = (itens && itens.length) ? itens.length : "";
@@ -1259,6 +1279,12 @@ function listar(alvo, itens, vazio, formatar, conta){
     const [titulo, detalhe] = formatar(item);
     li.textContent = titulo;
     if (detalhe){ const s = document.createElement("span"); s.textContent = detalhe; li.appendChild(s); }
+    if (acao){
+      const {rotulo, fazer} = acao(item);
+      const b = document.createElement("button");
+      b.className = "acaoItem"; b.textContent = rotulo; b.onclick = fazer;
+      li.appendChild(b);
+    }
     lista.appendChild(li);
   }
 }
@@ -1307,7 +1333,8 @@ function pintarEstado(estado){
   const capacidades = pintarOperacao(estado);
   listar("perguntas", estado.perguntas, "nenhuma", (p) => [p.texto, p.situacao], "cPerguntas");
   listar("agenda", estado.lembretes, "nada agendado", (a) => [a.texto, momento(a.vence_em)], "cAgenda");
-  listar("fatos", estado.fatos, "memória vazia", (f) => [f.value, f.key], "cFatos");
+  listar("fatos", estado.fatos, "memória vazia", (f) => [f.value, f.key], "cFatos",
+         (f) => ({rotulo: "esquecer", fazer: () => pedirMemoria("esquecer", f.key)}));
   $("modeloTopo").textContent = estado.modelo
     ? estado.modelo + (estado.voz ? " · voz local" : " · sem voz")
                     + (estado.ouvidos ? " · ouvidos locais" : "")
@@ -1393,6 +1420,7 @@ function abrirFluxo(){
     if (pacote.tipo === "estado"){ pintarEstado(pacote); }
     else if (pacote.tipo === "saude"){ pintarSaude(pacote); }
     else if (pacote.tipo === "lugares"){ marcarLugares(pacote.lugares); }
+    else if (pacote.tipo === "memoria"){ avisoDeMemoria(pacote); }
     else if (pacote.tipo === "operacao"){
       pintarOperacao(pacote);
       listar("perguntas", pacote.perguntas, "nenhuma", p => [p.texto, p.situacao], "cPerguntas");

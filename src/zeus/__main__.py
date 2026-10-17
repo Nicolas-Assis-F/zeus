@@ -659,6 +659,7 @@ def _executar(zeus, store, config):
     estado_local = Path(store.path).parent
     ouvidos = montar_ouvidos(config, estado_local)
     recebidas_da_hud = CaixaDeEntrada(maxsize=32)
+    memoria_hud = None
     hud, endereco = None, None
     chave = config.chave_hud or secrets.token_urlsafe(12)
     try:
@@ -883,6 +884,18 @@ def _executar(zeus, store, config):
                         raise
                     finally:
                         pedido["terminado"].set()
+                    continue
+                if pedido.get("tipo") == "memoria":
+                    if memoria_hud is None:
+                        from .memoria_hud import MemoriaDaHUD
+                        memoria_hud = MemoriaDaHUD(store)
+                    resultado = memoria_hud.executar(pedido["acao"], pedido["fato"])
+                    emit("memoria_hud", acao=resultado["acao"], ok=resultado["ok"])
+                    if hud is not None:
+                        hud.publicar("memoria", **resultado)
+                        hud.atualizar(retrato(store, config, voz, servido if modelo_ok else "",
+                                              ouvidos))
+                        hud.publicar("situacao", estado="ocioso", detalhe="—")
                     continue
                 texto = pedido.get("texto", "")
                 if pedido.get("tipo") == "audio":

@@ -255,6 +255,8 @@ def _construir(hud: ServidorHUD):
                 return self._json(401, {"erro": "chave inválida"})
             if caminho == "/escuta":
                 return self._escuta()
+            if caminho == "/memoria":
+                return self._memoria()
             if caminho != "/mensagem":
                 return self._json(404, {"erro": "rota desconhecida"})
             tamanho = self._tamanho(LIMITE_DE_MENSAGEM)
@@ -270,6 +272,23 @@ def _construir(hud: ServidorHUD):
             if not texto:
                 return self._json(400, {"erro": "mensagem vazia"})
             return self._enfileirar({"tipo": "texto", "texto": texto[:LIMITE_DE_MENSAGEM]})
+
+        def _memoria(self):
+            """Esquecer ou desfazer um fato (#79). Só enfileira: o banco é do
+            laço principal."""
+            tamanho = self._tamanho(LIMITE_DE_MENSAGEM)
+            if tamanho is None:
+                return
+            try:
+                dados = json.loads(self.rfile.read(tamanho) or b"{}")
+                acao, fato = dados.get("acao"), dados.get("fato")
+                if acao not in ("esquecer", "desfazer") or not isinstance(fato, str):
+                    raise ValueError
+            except (ValueError, UnicodeDecodeError, AttributeError):
+                return self._json(400, {"erro": "corpo inválido"})
+            if not fato.strip():
+                return self._json(400, {"erro": "fato vazio"})
+            return self._enfileirar({"tipo": "memoria", "acao": acao, "fato": fato[:200]})
 
         def _escuta(self):
             if hud.pasta_de_escuta is None:
