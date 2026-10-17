@@ -102,8 +102,10 @@ CATALOGO_DE_NIVEIS = {
     "enviar_whatsapp": RegraDeNivel(P, irreversivel=True, envia_a_terceiro=True),
 
     # Ações de sistema novas.
+    # A missão da fase 2 põe reiniciar o próprio serviço ou uma ponte em
+    # "faz e avisa"; outro serviço qualquer cai em pede antes (abaixo).
     "reiniciar_servico": RegraDeNivel(
-        P, reversivel_com="o serviço volta sozinho; conversa em andamento pode cair"),
+        F, reversivel_com="o serviço volta sozinho; conversa em andamento pode cair"),
     "mudar_volume": RegraDeNivel(F, reversivel_com="voltar ao volume anterior, guardado no desfazer_json"),
     "mudo": RegraDeNivel(F, reversivel_com="tirar do mudo"),
     "criar_evento_agenda": RegraDeNivel(F, reversivel_com="apagar o evento criado"),

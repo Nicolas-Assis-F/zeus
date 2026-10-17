@@ -119,12 +119,52 @@ def gravar_estado(arquivo: Path, estado: dict):
     os.replace(temporario, arquivo)
 
 
+def recuperar(estado, caiu, unidades, executar):
+    """Faz e avisa (fase 2): unidade da lista que caiu é reiniciada uma vez.
+    Devolve as linhas do que foi tentado. Nada fora da lista é tocado."""
+    linhas = []
+    for nome, detalhe in caiu:
+        if nome not in unidades or estado[nome].get("reiniciado"):
+            continue
+        codigo, _ = executar(["systemctl", "--user", "restart", nome], timeout=60)
+        estado[nome]["reiniciado"] = True
+        linhas.append(f"- {nome}: reiniciei" + ("" if codigo == 0 else f" (o systemctl devolveu {codigo})")
+                      + "; confiro na próxima rodada.")
+    return linhas
+
+
+def depois_do_reinicio(anterior, estado, voltou):
+    """Quem voltou depois do reinício, e quem continua caído mesmo assim."""
+    voltaram = [n for n in voltou if anterior.get(n, {}).get("reiniciado")]
+    insistentes = []
+    for nome, dados in estado.items():
+        if dados.get("reiniciado") and anterior.get(nome, {}).get("reiniciado") and not dados.get("insistente"):
+            dados["insistente"] = True
+            insistentes.append(nome)
+    return voltaram, insistentes
+
+
 def rodada(repo: Path, config, arquivo_de_estado: Path, executar=rodar,
-           enviar=enviar_pela_ponte, unidades=UNIDADES, confirmacoes=2) -> dict:
+           enviar=enviar_pela_ponte, unidades=UNIDADES, confirmacoes=2, recuperar_unidades=True) -> dict:
     _, saida = executar([str(repo / "zeus"), "check", "--modelo", "--canal"], timeout=120)
     atuais = {**problemas_das_unidades(unidades, executar), **problemas_do_check(saida)}
-    estado, caiu, voltou = comparar(ler_estado(arquivo_de_estado), atuais, confirmacoes)
-    texto = mensagem(caiu, voltou)
+    anterior = ler_estado(arquivo_de_estado)
+    estado, caiu, voltou = comparar(anterior, atuais, confirmacoes)
+    for nome in estado:  # o reinício já tentado continua lembrado enquanto durar a queda
+        if anterior.get(nome, {}).get("reiniciado"):
+            estado[nome]["reiniciado"] = True
+            estado[nome]["insistente"] = anterior[nome].get("insistente", False)
+    voltaram, insistentes = depois_do_reinicio(anterior, estado, voltou)
+    tentativas = recuperar(estado, caiu, unidades, executar) if recuperar_unidades else []
+    texto = mensagem(caiu, [v for v in voltou if v not in voltaram])
+    if tentativas:
+        texto += "\nTentei recuperar sozinho:\n" + "\n".join(tentativas)
+    if voltaram:
+        texto = (texto + "\n" if texto else "") + "Voltou depois do reinício: " + ", ".join(voltaram) + "."
+    if insistentes:
+        texto = (texto + "\n" if texto else "") + ("Não voltou mesmo depois do reinício: " + ", ".join(insistentes)
+                                                    + ". Precisa de você.")
+    texto = texto.strip()
     enviado = None
     if texto:
         enviado = bool(config.whatsapp_grupo) and enviar(config.whatsapp_ponte_url,
@@ -135,7 +175,8 @@ def rodada(repo: Path, config, arquivo_de_estado: Path, executar=rodar,
                 estado[nome]["avisado"] = False
     gravar_estado(arquivo_de_estado, estado)
     return {"event": "vigia_servico", "problemas": atuais,
-            "caiu": [n for n, _ in caiu], "voltou": voltou, "aviso_enviado": enviado}
+            "caiu": [n for n, _ in caiu], "voltou": voltou, "reiniciou": [l.split(":")[0][2:] for l in tentativas],
+            "aviso_enviado": enviado}
 
 
 def main(argv=None):

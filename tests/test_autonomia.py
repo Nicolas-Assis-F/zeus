@@ -311,9 +311,11 @@ class TestNiveis(Base):
     def test_conservadora_e_ousada(self):
         self.assertEqual(nivel_efetivo("lembrar_fato", {}, autonomia="conservadora")[0], Nivel.PEDE_ANTES)
         self.assertEqual(nivel_efetivo("pesquisar", {}, autonomia="conservadora")[0], Nivel.LIVRE)
-        self.assertEqual(nivel_efetivo("reiniciar_servico", {"servico": "zeus"})[0], Nivel.PEDE_ANTES)
-        self.assertEqual(nivel_efetivo("reiniciar_servico", {"servico": "zeus"}, autonomia="ousada")[0],
-                         Nivel.FAZ_E_AVISA)
+        # Missão fase 2: reiniciar o Zeus ou uma ponte é "faz e avisa";
+        # o conservador sobe para pede antes.
+        self.assertEqual(nivel_efetivo("reiniciar_servico", {"servico": "zeus"})[0], Nivel.FAZ_E_AVISA)
+        self.assertEqual(nivel_efetivo("reiniciar_servico", {"servico": "zeus"}, autonomia="conservadora")[0],
+                         Nivel.PEDE_ANTES)
         self.assertEqual(nivel_efetivo("lembrar_fato", {}, autonomia="invalida")[0], Nivel.PEDE_ANTES)
 
     def test_irreversivel_e_terceiro_nunca_descem(self):
