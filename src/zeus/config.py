@@ -92,6 +92,13 @@ class Config:
     briefing_hora: str = ""
     briefing_janela_horas: int = 3
     briefing_audio: bool = True
+    # Vigia de hardware (#76): avisa no grupo (e na sala, com a escuta no
+    # ambiente ligada) quando o X99 passa dos limites por 3 leituras seguidas.
+    hardware_vigia: bool = False
+    hardware_cpu_celsius: int = 85
+    hardware_gpu_celsius: int = 85
+    hardware_ram_pct: int = 92
+    hardware_disco_livre_pct: int = 10
     # Escuta no ambiente, pelo microfone da própria máquina (#68). Desligada
     # por padrão: microfone ouvindo a casa é decisão de Nicolas. Fonte e saída
     # são nomes de nó do PipeWire (`wpctl status`); vazio é o padrão do sistema.

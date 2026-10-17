@@ -372,3 +372,24 @@ os fatos. Para conferir sem enviar nada:
 ./zeus briefing          # o texto de hoje
 ./zeus briefing --dados  # e o que foi coletado
 ```
+
+## Vigia de hardware (#76)
+
+```json
+"hardware_vigia": true,
+"hardware_cpu_celsius": 85,
+"hardware_gpu_celsius": 85,
+"hardware_ram_pct": 92,
+"hardware_disco_livre_pct": 10
+```
+
+A cada 30 s, o Zeus lê o mesmo retrato do painel de saúde e compara com os
+limites. Também vigia a VRAM (98%) e a swap (50%), com limites fixos. O alerta
+exige 3 leituras seguidas, e depois a mesma medida fica 30 min quieta. O
+"Normalizou" só vem abaixo do limite menos a margem (5 °C ou 5%).
+
+O alerta vai para o grupo pela fila durável e, com a escuta no ambiente
+ligada, também é falado na sala. A fala só acontece com a escuta dormindo e o
+alto-falante livre, então ele nunca fala por cima de uma conversa. Medida que
+a máquina não informa (potência de GeForce, por exemplo) não vira zero nem
+alerta.
